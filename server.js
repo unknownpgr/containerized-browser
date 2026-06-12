@@ -230,6 +230,16 @@ function withTimeout(p, ms) {
   ]);
 }
 
+// Sniff a content-type from a binary result's magic bytes (png/jpeg/pdf).
+function sniffContentType(buf) {
+  if (buf.length >= 4) {
+    if (buf[0] === 0x89 && buf[1] === 0x50) return 'image/png';
+    if (buf[0] === 0xff && buf[1] === 0xd8) return 'image/jpeg';
+    if (buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46) return 'application/pdf';
+  }
+  return 'application/octet-stream';
+}
+
 async function handleExec(req, res) {
   const code = await readBody(req);
   const logs = [];
@@ -242,37 +252,22 @@ async function handleExec(req, res) {
       fn(page, context, pwBrowser, (...a) => logs.push(a.map(String).join(' '))),
       ms,
     );
-    session.push({ ts: Date.now(), code }); // record only successful steps
+    // A Buffer/typed-array result (e.g. page.screenshot()/page.pdf()) is an
+    // observation, not a state change: stream the raw bytes and don't record it.
+    if (Buffer.isBuffer(result) || ArrayBuffer.isView(result)) {
+      const buf = Buffer.from(result.buffer || result);
+      res.writeHead(200, { 'content-type': sniffContentType(buf) });
+      res.end(buf);
+      return;
+    }
+    session.push({ ts: Date.now(), code }); // record only successful, non-binary steps
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ ok: true, result: jsonSafe(result), logs }));
   } catch (e) {
-    res.writeHead(200, { 'content-type': 'application/json' });
+    // 422 so `curl -f -o file` won't overwrite the target with an error body.
+    res.writeHead(422, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: e.message, stack: e.stack, logs }));
   }
-}
-
-async function handleScreenshot(req, res, u) {
-  const page = await getPage();
-  const type = u.searchParams.get('type') === 'jpeg' ? 'jpeg' : 'png';
-  const sel = u.searchParams.get('selector');
-  const opts = { type };
-  if (type === 'jpeg') opts.quality = Number(u.searchParams.get('quality') || 80);
-  const buf = sel
-    ? await page.locator(sel).screenshot(opts)
-    : await page.screenshot({ ...opts, fullPage: u.searchParams.get('fullPage') === 'true' });
-  res.writeHead(200, { 'content-type': type === 'jpeg' ? 'image/jpeg' : 'image/png' });
-  res.end(buf);
-}
-
-async function handlePdf(req, res, u) {
-  const page = await getPage();
-  const buf = await page.pdf({
-    format: u.searchParams.get('format') || 'A4',
-    landscape: u.searchParams.get('landscape') === 'true',
-    printBackground: true,
-  });
-  res.writeHead(200, { 'content-type': 'application/pdf' });
-  res.end(buf);
 }
 
 // --- 2. CDP reverse proxy + static viewer ----------------------------------
@@ -323,10 +318,6 @@ const server = http.createServer(async (req, res) => {
       session.length = 0;
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
-    } else if (p === '/screenshot') {
-      await handleScreenshot(req, res, u);
-    } else if (p === '/pdf') {
-      await handlePdf(req, res, u);
     } else if (p === '/guide') {
       res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8' });
       res.end(GUIDE);

@@ -7,12 +7,12 @@ hand you a **standalone script** that reproduces what you just did.
 
 ```
  Agent (Claude Code, host shell)
-   │   POST /exec  (JS in)  ──►  ┌───────────────────────────────────┐
-   │   GET  /screenshot,/pdf ──► │  one container, one port (8080)   │
-   │   GET  /session  (codify)──►│                                   │
-   │   GET  /guide  (self-doc)──►│   Chromium (headless) + Playwright │
-   │                             │   + hub + live screencast viewer  │
- You (browser)  GET / ──────────►└───────────────────────────────────┘
+   │  POST /exec  (JS in → JSON,  ┌───────────────────────────────────┐
+   │     or raw bytes for a    ──►│  one container, one port (8080)   │
+   │     screenshot/pdf Buffer)   │                                   │
+   │  GET  /session  (codify)  ──►│   Chromium (headless) + Playwright │
+   │  GET  /guide  (self-doc)  ──►│   + hub + live screencast viewer  │
+ You (browser)  GET / ───────────►└───────────────────────────────────┘
         live read-only view
 ```
 
@@ -90,11 +90,9 @@ docker run --rm -d -p 8080:8080 --name cb containerized-browser
 |--------|------------------|--------------------------------------------------|
 | GET    | `/`              | live read-only screencast viewer                 |
 | GET    | `/guide`         | agent operating manual (served from the image)   |
-| POST   | `/exec`          | run async JS with `{ page, context, browser, log }`; JSON result |
+| POST   | `/exec`          | run async JS with `{ page, context, browser, log }`; JSON result, or raw bytes if the snippet returns a Buffer (e.g. `page.screenshot()`, `page.pdf()`) |
 | GET    | `/session`       | recorded successful snippets, in order (for codify) |
 | POST   | `/session/reset` | clear the recording                              |
-| GET    | `/screenshot`    | PNG/JPEG of the current page (`fullPage`, `type`, `quality`, `selector`) |
-| GET    | `/pdf`           | PDF of the current page (`format`, `landscape`)  |
 | GET    | `/cdp`           | raw CDP endpoint for an external Playwright       |
 | WS     | `/stream`        | JPEG screencast frames to the viewer             |
 

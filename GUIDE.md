@@ -58,8 +58,10 @@ JS
 
 Response shape:
 
-- success: `{ "ok": true, "result": <json|null>, "logs": [...] }`
-- failure: `{ "ok": false, "error": "...", "stack": "...", "logs": [...] }`
+- success (non-binary): `200` `{ "ok": true, "result": <json|null>, "logs": [...] }`
+- success (Buffer result): `200` with raw bytes — see §2
+- failure: `422` `{ "ok": false, "error": "...", "stack": "...", "logs": [...] }`
+  (use plain `curl -s` for JSON calls so you still get the error body to fix it)
 
 Notes:
 - **State persists** between calls — cookies, the open page, scroll position all
@@ -76,27 +78,26 @@ Notes:
 
 ---
 
-## 2. See the page — screenshots & PDF
+## 2. See the page — same `/exec`, just return bytes
 
-Visual feedback matters. To actually *look* at the page, download an image to
-the host and open it (your Read/file-view tool can display PNG/JPEG/PDF):
+Visual feedback matters. There is **no separate screenshot/pdf endpoint** — a
+screenshot or PDF is simply an `/exec` snippet that **returns a Buffer**. When
+the result is binary, `/exec` streams the raw bytes with a sniffed content-type
+(`image/png`, `image/jpeg`, `application/pdf`) instead of JSON. Download it to a
+file and open it (your Read/file-view tool can display PNG/JPEG/PDF). Use
+`-f` so an error never overwrites your file:
 
 ```bash
-curl -s "localhost:8080/screenshot" -o /tmp/page.png        # then view /tmp/page.png
-curl -s "localhost:8080/screenshot?fullPage=true" -o /tmp/full.png
-curl -s "localhost:8080/screenshot?selector=%23main" -o /tmp/el.png   # CSS selector, url-encoded
-curl -s "localhost:8080/screenshot?type=jpeg&quality=70" -o /tmp/page.jpg
-curl -s "localhost:8080/pdf?format=A4" -o /tmp/page.pdf
+curl -fs -X POST localhost:8080/exec --data-binary 'return await page.screenshot()' -o /tmp/page.png
+curl -fs -X POST localhost:8080/exec --data-binary 'return await page.screenshot({ fullPage: true })' -o /tmp/full.png
+curl -fs -X POST localhost:8080/exec --data-binary 'return await page.locator("#main").screenshot()' -o /tmp/el.png
+curl -fs -X POST localhost:8080/exec --data-binary 'return await page.pdf({ format: "A4" })' -o /tmp/page.pdf
 ```
 
-| endpoint      | query params                                  | returns           |
-|---------------|-----------------------------------------------|-------------------|
-| `/screenshot` | `fullPage`, `type=png\|jpeg`, `quality`, `selector` | `image/png`/`jpeg` |
-| `/pdf`        | `format` (A4/Letter…), `landscape`            | `application/pdf` |
-
-These operate on the current page and do **not** affect the recorded session.
-The human is also watching everything live at `/` — use that, and screenshots,
-together.
+Because it's just `page`/`locator` you have the full Playwright API (clip,
+element shots, jpeg quality, etc.). Binary results are observations, so they are
+**not** recorded into the session. The human is also watching everything live at
+`/` — use that and screenshots together.
 
 ---
 
@@ -154,11 +155,9 @@ Call `POST /session/reset` to start recording a fresh task from scratch.
 |--------|------------------|-------------------------------------------------|
 | GET    | `/`              | live read-only screencast viewer (for the human)|
 | GET    | `/guide`         | this document                                   |
-| POST   | `/exec`          | run an async JS snippet; returns JSON           |
+| POST   | `/exec`          | run an async JS snippet; JSON result, or raw bytes if it returns a Buffer |
 | GET    | `/session`       | recorded successful snippets, in order          |
 | POST   | `/session/reset` | clear the recording                             |
-| GET    | `/screenshot`    | PNG/JPEG of the current page                     |
-| GET    | `/pdf`           | PDF of the current page                          |
 | GET    | `/cdp`           | raw CDP endpoint (for external Playwright)       |
 
 ---
