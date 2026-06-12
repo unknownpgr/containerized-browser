@@ -1,0 +1,15 @@
+{
+  "name": "containerized-browser",
+  "version": "0.1.0",
+  "description": "Headless Chromium in a container: Playwright drives it over CDP, users watch live via a read-only web UI (CDP screencast).",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "http-proxy": "^1.18.1",
+    "playwright-core": "^1.60.0",
+    "ws": "^8.18.0"
+  }
+}
