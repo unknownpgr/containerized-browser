@@ -33,8 +33,8 @@ You drive it by `POST`ing JavaScript and reading JSON back, so the host needs
    curl -s localhost:8080/guide
    ```
 
-   That guide documents the `/exec` (drive), `/screenshot` & `/pdf` (see),
-   and `/session` (codify) endpoints in detail.
+   That guide documents the `/exec` (drive) and `/session` (codify) endpoints
+   in detail, including how screenshots and PDFs come back from `/exec`.
 
 3. **Orient the user first.** They may have only seen this URL and nothing else.
    Before driving the browser, tell them in their own language:

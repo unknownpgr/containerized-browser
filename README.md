@@ -49,14 +49,14 @@ This design is the endpoint of a few deliberate decisions:
    then `curl /guide` and follow it." The agent figures out the rest.
 
 4. **Explore and codify share the same primitives.** Every successful `/exec`
-   snippet is Playwright code *and* is recorded. "Make this a script" is then a
-   faithful rendering of the recording (`GET /session`) — not a lossy
-   re-derivation — producing a standalone `playwright-core` file that assumes the
-   container is running at a host:port.
+   snippet is Playwright code *and* is recorded. "Make this a script" then
+   renders the recording (`GET /session`) into a standalone `playwright-core`
+   file that assumes the container is running at a host:port.
 
-5. **Humans watch, they don't squint at screenshots.** A second, independent CDP
-   client screencasts the live page to the viewer at `/`. The agent and the
-   viewer never fight (CDP allows multiple clients on one Chrome).
+5. **Humans watch the live page instead of one-off screenshots.** A second,
+   independent CDP client screencasts the live page to the viewer at `/`. The
+   agent and the viewer operate independently (CDP allows multiple clients on one
+   Chrome).
 
 ## Quick start
 

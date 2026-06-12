@@ -70,18 +70,17 @@ Notes:
 - The return value must be JSON-serializable. To inspect a DOM element, return a
   derived value (`await page.locator('h1').innerText()`), not the handle itself.
 - Default per-call timeout is 30s; override with header `X-Exec-Timeout: 60000`.
-- Only **successful** snippets are recorded for phase 2 (see §3). Failed
-  experiments don't pollute the eventual script.
+- Only **successful** snippets are recorded for phase 2 (see §3).
 - Keep selectors stable and human-meaningful (roles, text, labels) so the
   generated script stays robust:
   `page.getByRole('button', { name: 'Sign in' })`, `page.getByLabel('Email')`.
 
 ---
 
-## 2. See the page — same `/exec`, just return bytes
+## 2. See the page — return bytes from `/exec`
 
-Visual feedback matters. There is **no separate screenshot/pdf endpoint** — a
-screenshot or PDF is simply an `/exec` snippet that **returns a Buffer**. When
+There is **no separate screenshot/pdf endpoint** — a screenshot or PDF is simply
+an `/exec` snippet that **returns a Buffer**. When
 the result is binary, `/exec` streams the raw bytes with a sniffed content-type
 (`image/png`, `image/jpeg`, `application/pdf`) instead of JSON. Download it to a
 file and open it (your Read/file-view tool can display PNG/JPEG/PDF). Use
