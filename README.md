@@ -16,6 +16,19 @@ hand you a **standalone script** that reproduces what you just did.
         live read-only view
 ```
 
+## Point an agent at it
+
+On a machine that has only `docker` and an agent CLI (e.g. Claude Code), give the
+agent this one URL and ask it to follow it:
+
+```
+https://raw.githubusercontent.com/unknownpgr/containerized-browser/main/BOOTSTRAP.md
+```
+
+The agent pulls the image, runs it on port 8080, reads `GET /guide` from the
+running container, tells you how to watch (<http://localhost:8080/>), and starts
+driving the browser for you. No other setup.
+
 ## Why it's shaped this way
 
 This design is the endpoint of a few deliberate decisions:
