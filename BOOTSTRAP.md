@@ -43,7 +43,8 @@ You drive it by `POST`ing JavaScript and reading JSON back, so the host needs
     you didn't pin one, read the auto-generated one from the container's logs:
 
     ```bash
-    docker logs cb 2>&1 | grep -A6 'AUTH ENABLED'
+    docker logs cb 2>&1 | grep -A6 'AUTH ENABLED'                 # human-readable box
+    AUTH=$(docker logs cb 2>&1 | grep -oE 'AUTH_PASSWORD=[^ ]+' | head -1 | cut -d= -f2)
     ```
 
     Send it as `Authorization: Bearer <password>` (or `?token=<password>`) on all

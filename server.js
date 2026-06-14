@@ -468,5 +468,8 @@ server.on('upgrade', (req, socket, head) => {
       '',
     ];
     for (const line of banner) console.log(line);
+    // Clean, machine-readable line so `docker logs | grep` extracts the exact
+    // secret (the boxed line above is padded/bordered and grep-hostile).
+    console.log(`AUTH_PASSWORD=${AUTH_PASSWORD}`);
   });
 })().catch((e) => { log('fatal:', e); process.exit(1); });

@@ -20,7 +20,7 @@ prints it to its own logs at startup, inside a box:
 
 ```bash
 # read it from the container you just started (substitute its name/id):
-AUTH=$(docker logs cb 2>&1 | grep -oE 'password: .*' | head -1 | cut -d' ' -f2-)
+AUTH=$(docker logs cb 2>&1 | grep -oE 'AUTH_PASSWORD=[^ ]+' | head -1 | cut -d= -f2)
 ```
 
 (If the user chose their own password they already know it; otherwise it is this
