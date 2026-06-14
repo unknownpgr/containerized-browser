@@ -12,6 +12,34 @@ If a different host/port was used, substitute it everywhere.
 
 ---
 
+## 0a. AUTH — every endpoint except this guide needs the password
+
+This `/guide` is the **only** public endpoint. Everything else — the viewer,
+`/exec`, `/session`, `/cdp` — is guarded by **one shared secret**. The container
+prints it to its own logs at startup, inside a box:
+
+```bash
+# read it from the container you just started (substitute its name/id):
+AUTH=$(docker logs cb 2>&1 | grep -oE 'password: .*' | head -1 | cut -d' ' -f2-)
+```
+
+(If the user chose their own password they already know it; otherwise it is this
+auto-generated one.) Send it with every **non-`/guide`** request as a Bearer
+token, or as a `?token=` query:
+
+```bash
+curl -s -H "Authorization: Bearer $AUTH" localhost:8080/session
+curl -s 'localhost:8080/session?token='"$AUTH"     # equivalent
+```
+
+Tell the **human** the same password — they type it into the browser when the
+viewer at `/` prompts for a login (any username, this as the password).
+
+In the curl examples below, assume `-H "Authorization: Bearer $AUTH"` is added to
+every call (omitted for brevity).
+
+---
+
 ## 0. FIRST — orient the user (do this before anything else)
 
 The user may have only seen a bootstrap URL and nothing else, so they can be
@@ -114,12 +142,16 @@ at a host:port** and reproduces the task. Default to a `playwright-core`
 client that attaches over CDP:
 
 ```js
-// flow.js — run with: CDP=http://localhost:8080/cdp node flow.js [args]
+// flow.js — run with: CDP=http://localhost:8080/cdp AUTH=<password> node flow.js [args]
 // requires once on the runner:  npm i playwright-core
 const { chromium } = require('playwright-core');
 
 (async () => {
-  const browser = await chromium.connectOverCDP(process.env.CDP || 'http://localhost:8080/cdp');
+  // the container is auth-guarded; pass the shared secret as a Bearer header.
+  // connectOverCDP applies these headers to both the /json fetch and the WS handshake.
+  const browser = await chromium.connectOverCDP(process.env.CDP || 'http://localhost:8080/cdp', {
+    headers: { Authorization: `Bearer ${process.env.AUTH}` },
+  });
   const context = browser.contexts()[0] ?? (await browser.newContext());
   const page = context.pages()[0] ?? (await context.newPage());
 
@@ -150,22 +182,25 @@ Call `POST /session/reset` to start recording a fresh task from scratch.
 
 ## 4. Endpoint reference
 
-| method | path             | purpose                                         |
-|--------|------------------|-------------------------------------------------|
-| GET    | `/`              | live read-only screencast viewer (for the human)|
-| GET    | `/guide`         | this document                                   |
-| POST   | `/exec`          | run an async JS snippet; JSON result, or raw bytes if it returns a Buffer |
-| GET    | `/session`       | recorded successful snippets, in order          |
-| POST   | `/session/reset` | clear the recording                             |
-| GET    | `/cdp`           | raw CDP endpoint (for external Playwright)       |
+All paths require the password (§0a) **except `/guide`**, which is public.
+
+| method | path             | auth | purpose                                  |
+|--------|------------------|------|------------------------------------------|
+| GET    | `/`              | yes  | live read-only screencast viewer (for the human)|
+| GET    | `/guide`         | no   | this document                            |
+| POST   | `/exec`          | yes  | run an async JS snippet; JSON result, or raw bytes if it returns a Buffer |
+| GET    | `/session`       | yes  | recorded successful snippets, in order   |
+| POST   | `/session/reset` | yes  | clear the recording                      |
+| GET    | `/cdp`           | yes  | raw CDP endpoint (for external Playwright)|
 
 ---
 
 ## 5. Limits & etiquette
 
-- This is a **dev tool**. `/exec` evaluates arbitrary JS and the container is
-  meant to be bound to localhost — do not expose it publicly or point it at
-  untrusted pages.
+- This is a **dev tool**. `/exec` evaluates arbitrary JS. The whole surface is
+  guarded by the shared password (§0a), but it is still wise to bind the
+  container to localhost and not point it at untrusted pages. Never paste the
+  password into a page or commit it to the generated script — pass it via env.
 - **Newest page wins**: when a click opens a new tab, both the viewer and
   `page` follow it.
 - No audio; the viewer is observation-only by design.

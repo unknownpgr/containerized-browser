@@ -18,6 +18,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 const httpProxy = require('http-proxy');
 const { WebSocket, WebSocketServer } = require('ws');
@@ -34,6 +35,70 @@ const QUALITY = Number(process.env.VIEW_QUALITY || 60);
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// --- 0. auth ---------------------------------------------------------------
+//
+// A single shared secret guards the WHOLE surface: the human's read-only viewer
+// (/ , /stream) and the agent's control plane (/exec, /session, /cdp). It comes
+// from $AUTH_PASSWORD; if unset we mint a random one and print it at boot so the
+// tool is never silently unprotected.
+//
+// The same secret is accepted as, in priority order:
+//   - `Authorization: Bearer <secret>`  (agent / curl)
+//   - `Authorization: Basic <user:secret>` (browser native login — any username)
+//   - cookie `cb_auth=<secret>`          (set after a browser logs in, so the
+//                                          /stream WebSocket handshake — which
+//                                          can't carry an Authorization header —
+//                                          authenticates automatically)
+//   - `?token=<secret>` query param      (WebSocket clients / quick curl)
+
+const COOKIE_NAME = 'cb_auth';
+let AUTH_PASSWORD = process.env.AUTH_PASSWORD || '';
+const AUTH_GENERATED = !AUTH_PASSWORD;
+if (AUTH_GENERATED) AUTH_PASSWORD = crypto.randomBytes(18).toString('base64url');
+
+function safeEqual(a, b) {
+  const ba = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  // length leak is unavoidable; the timing-safe compare needs equal lengths
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
+function presentedSecret(req) {
+  const h = req.headers['authorization'];
+  if (h) {
+    const sp = h.indexOf(' ');
+    const scheme = (sp === -1 ? h : h.slice(0, sp)).toLowerCase();
+    const val = sp === -1 ? '' : h.slice(sp + 1).trim();
+    if (scheme === 'bearer' && val) return val;
+    if (scheme === 'basic' && val) {
+      const dec = Buffer.from(val, 'base64').toString();
+      const i = dec.indexOf(':');               // strip the username
+      return i === -1 ? dec : dec.slice(i + 1);
+    }
+  }
+  const cookie = req.headers['cookie'];
+  if (cookie) {
+    for (const part of cookie.split(';')) {
+      const i = part.indexOf('=');
+      if (i === -1) continue;
+      if (part.slice(0, i).trim() === COOKIE_NAME) {
+        return decodeURIComponent(part.slice(i + 1).trim());
+      }
+    }
+  }
+  try {
+    const t = new URL(req.url, 'http://localhost').searchParams.get('token');
+    if (t) return t;
+  } catch (_) {}
+  return null;
+}
+
+function isAuthed(req) {
+  const s = presentedSecret(req);
+  return s != null && safeEqual(s, AUTH_PASSWORD);
+}
 
 // --- 1. launch Chromium ----------------------------------------------------
 
@@ -309,6 +374,24 @@ const server = http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     const p = u.pathname;
+    // /guide is just the operating manual: it must be readable WITHOUT the
+    // password so a fresh agent can fetch it and learn how to authenticate.
+    if (p === '/guide') {
+      res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8' });
+      res.end(GUIDE);
+      return;
+    }
+    if (!isAuthed(req)) {
+      res.writeHead(401, {
+        'WWW-Authenticate': 'Basic realm="containerized-browser", charset="UTF-8"',
+        'content-type': 'text/plain; charset=utf-8',
+      });
+      res.end('401 Unauthorized — supply the password (Basic auth, Bearer token, or ?token=).\n');
+      return;
+    }
+    // Bridge browser logins to the cookie that the /stream WS handshake needs.
+    res.setHeader('Set-Cookie',
+      `${COOKIE_NAME}=${encodeURIComponent(AUTH_PASSWORD)}; Path=/; HttpOnly; SameSite=Strict`);
     if (p === '/exec' && req.method === 'POST') {
       await handleExec(req, res);
     } else if (p === '/session' && req.method === 'GET') {
@@ -318,9 +401,6 @@ const server = http.createServer(async (req, res) => {
       session.length = 0;
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
-    } else if (p === '/guide') {
-      res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8' });
-      res.end(GUIDE);
     } else if (p.startsWith('/cdp/json')) {
       await handleCdpJson(req, res, req.headers.host);
     } else if (p.startsWith('/cdp')) {
@@ -344,9 +424,16 @@ streamWss.on('connection', (ws) => {
 });
 
 server.on('upgrade', (req, socket, head) => {
-  if (req.url === '/stream') {
+  if (!isAuthed(req)) {
+    socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  // route on the pathname so a `?token=` auth query doesn't break matching
+  const upath = new URL(req.url, 'http://localhost').pathname;
+  if (upath === '/stream') {
     streamWss.handleUpgrade(req, socket, head, (ws) => streamWss.emit('connection', ws, req));
-  } else if (req.url.startsWith('/cdp/devtools')) {
+  } else if (upath.startsWith('/cdp/devtools')) {
     req.url = req.url.replace(/^\/cdp/, '');
     cdpProxy.ws(req, socket, head);
   } else {
@@ -367,5 +454,19 @@ server.on('upgrade', (req, socket, head) => {
     log(`  agent guide        : http://localhost:${PORT}/guide`);
     log(`  drive (code in)    : POST http://localhost:${PORT}/exec`);
     log(`  CDP for Playwright : http://localhost:${PORT}/cdp`);
+    const banner = [
+      '',
+      '  ┌─────────────────────────────────────────────────────────────┐',
+      '  │  AUTH ENABLED — every endpoint requires this password/token  │',
+      `  │  password: ${AUTH_PASSWORD.padEnd(48)} │`,
+      AUTH_GENERATED
+        ? '  │  (auto-generated; set $AUTH_PASSWORD to pin your own)        │'
+        : '  │  (from $AUTH_PASSWORD)                                       │',
+      '  │  viewer: open / in a browser and enter it as the password    │',
+      '  │  agent : -H "Authorization: Bearer <password>"  (or ?token=) │',
+      '  └─────────────────────────────────────────────────────────────┘',
+      '',
+    ];
+    for (const line of banner) console.log(line);
   });
 })().catch((e) => { log('fatal:', e); process.exit(1); });

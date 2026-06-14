@@ -96,20 +96,45 @@ docker run --rm -d -p 8080:8080 --name cb containerized-browser
 | GET    | `/cdp`           | raw CDP endpoint for an external Playwright       |
 | WS     | `/stream`        | JPEG screencast frames to the viewer             |
 
+All paths require the password (see [Auth](#auth)) **except `/guide`**, which is
+public so an agent can read it before it has the secret.
+
 ## Knobs (env vars)
 
 | var | default | meaning |
 |-----|---------|---------|
+| `AUTH_PASSWORD` | *(auto-generated, printed to logs)* | shared secret guarding the whole surface — viewer password **and** agent token |
 | `PORT` | `8080` | hub / viewer / api / cdp port |
 | `VIEW_WIDTH` `VIEW_HEIGHT` | `1280` `800` | window + screencast max size |
 | `VIEW_QUALITY` | `60` | screencast JPEG quality (1–100) |
 | `CHROME_BIN` | `/usr/bin/chromium` | chromium binary path |
 
+## Auth
+
+Every endpoint — the viewer, `/exec`, `/session`, `/cdp` — is guarded by a single
+shared secret:
+
+- Set it yourself: `docker run ... -e AUTH_PASSWORD=hunter2 ...`
+- Or leave it unset and the container **mints a random one and prints it to its
+  logs** at startup (`docker logs cb`), so the surface is never silently open.
+
+The same secret works two ways:
+
+- **Human (viewer):** open `/` in a browser; it prompts for a login — any
+  username, the secret as the password.
+- **Agent (curl / Playwright):** send `Authorization: Bearer <secret>` (or append
+  `?token=<secret>`). Example:
+
+  ```bash
+  curl -s -H "Authorization: Bearer $AUTH_PASSWORD" \
+    -X POST localhost:8080/exec --data-binary 'return await page.title()'
+  ```
+
 ## Notes & limits
 
-- **Dev tool, not production.** `/exec` evaluates arbitrary JavaScript; bind the
-  container to localhost and don't point it at untrusted pages. `--no-sandbox` is
-  used (runs as root in the container).
+- **Dev tool, not production.** `/exec` evaluates arbitrary JavaScript; keep the
+  password secret, bind the container to localhost and don't point it at
+  untrusted pages. `--no-sandbox` is used (runs as root in the container).
 - **Newest page wins.** When a click opens a new tab, both the viewer and the
   controller's `page` follow it.
 - **Frame-based, not video.** Fine for dev; swap to WebRTC if you need smooth

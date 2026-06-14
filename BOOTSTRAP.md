@@ -26,6 +26,8 @@ You drive it by `POST`ing JavaScript and reading JSON back, so the host needs
    ```
 
    Use port `8080` unless the user wants another; map it the same on both sides.
+   Optionally pin the password with `-e AUTH_PASSWORD=…`; if you don't, the
+   container generates one and prints it to its logs (see step 2a).
 
 2. **Read the full operating guide** from the running container and follow it:
 
@@ -34,13 +36,26 @@ You drive it by `POST`ing JavaScript and reading JSON back, so the host needs
    ```
 
    That guide documents the `/exec` (drive) and `/session` (codify) endpoints
-   in detail, including how screenshots and PDFs come back from `/exec`.
+   in detail, including how screenshots and PDFs come back from `/exec`. `/guide`
+   is the one endpoint that needs no password.
+
+2a. **Get the password.** Every other endpoint is guarded by a shared secret. If
+    you didn't pin one, read the auto-generated one from the container's logs:
+
+    ```bash
+    docker logs cb 2>&1 | grep -A6 'AUTH ENABLED'
+    ```
+
+    Send it as `Authorization: Bearer <password>` (or `?token=<password>`) on all
+    `/exec`, `/session`, `/cdp` calls, and give the **same** password to the
+    human so they can log into the viewer.
 
 3. **Orient the user first.** They may have only seen this URL and nothing else.
    Before driving the browser, tell them in their own language:
    - what this is (a real browser you'll drive for them),
    - that they can **watch it live at `http://localhost:8080/`** (give the actual
-     port), and that the viewer is read-only,
+     port) — the browser will prompt for a login: any username, and the password
+     from step 2a — and that the viewer is read-only,
    - that you'll first explore together, then can produce a re-runnable script.
 
 Then start helping them with their task.
