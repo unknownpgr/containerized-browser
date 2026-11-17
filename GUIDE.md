@@ -50,7 +50,9 @@ them, briefly and in their language:
   agent) will drive on their behalf. They watch; they don't have to click.
 - **How to watch**: open **http://localhost:8080/** in their browser — it is a
   live, read-only screencast of the page you are controlling. Give them the
-  exact URL/port that is actually in use.
+  exact URL/port that is actually in use. It shows a strip of every open tab
+  and follows yours by default; they can click a tab to pin it, or
+  **all tabs** to see every tab live side by side.
 - **The workflow**: first you'll explore the site together by conversation
   (phase 1); then, on request, you'll turn what you did into a standalone script
   they can re-run later (phase 2).
@@ -201,6 +203,7 @@ All paths require the password (§0a) **except `/guide`**, which is public.
   guarded by the shared password (§0a), but it is still wise to bind the
   container to localhost and not point it at untrusted pages. Never paste the
   password into a page or commit it to the generated script — pass it via env.
-- **Newest page wins**: when a click opens a new tab, both the viewer and
-  `page` follow it.
+- **Newest page wins**: when a click opens a new tab, `page` follows it — and
+  so does the viewer, unless the human pinned another tab or is watching all
+  tabs. Older tabs stay reachable via `context.pages()`.
 - No audio; the viewer is observation-only by design.

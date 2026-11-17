@@ -54,9 +54,10 @@ This design is the endpoint of a few deliberate decisions:
    file that assumes the container is running at a host:port.
 
 5. **Humans watch the live page instead of one-off screenshots.** A second,
-   independent CDP client screencasts the live page to the viewer at `/`. The
-   agent and the viewer operate independently (CDP allows multiple clients on one
-   Chrome).
+   independent CDP client screencasts the browser's tabs to the viewer at `/` —
+   by default the tab the agent is driving, but the human can pin any open tab
+   or watch all of them side by side. The agent and the viewer operate
+   independently (CDP allows multiple clients on one Chrome).
 
 ## Quick start
 
@@ -94,7 +95,7 @@ docker run --rm -d -p 8080:8080 --name cb containerized-browser
 | GET    | `/session`       | recorded successful snippets, in order (for codify) |
 | POST   | `/session/reset` | clear the recording                              |
 | GET    | `/cdp`           | raw CDP endpoint for an external Playwright       |
-| WS     | `/stream`        | JPEG screencast frames to the viewer             |
+| WS     | `/stream`        | viewer feed: tab list + JPEG frames of the tabs it watches |
 
 All paths require the password (see [Auth](#auth)) **except `/guide`**, which is
 public so an agent can read it before it has the secret.
@@ -135,8 +136,13 @@ The same secret works two ways:
 - **Dev tool, not production.** `/exec` evaluates arbitrary JavaScript; keep the
   password secret, bind the container to localhost and don't point it at
   untrusted pages. `--no-sandbox` is used (runs as root in the container).
-- **Newest page wins.** When a click opens a new tab, both the viewer and the
-  controller's `page` follow it.
+- **Newest page wins.** When a click opens a new tab, the controller's `page`
+  follows it.
+- **Every tab is watchable.** The viewer shows a strip of all open tabs, with the
+  agent's tab marked. By default it follows the agent's tab; click any tab to
+  pin it, or **all tabs** for a live grid. A viewer that joins gets the current
+  frame right away, even if the page is static. Only tabs that someone is
+  watching are screencast.
 - **Frame-based, not video.** Fine for dev; swap to WebRTC if you need smooth
   60fps.
 - No audio; the viewer is observation-only by design.

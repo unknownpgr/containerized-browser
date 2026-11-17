@@ -5,21 +5,61 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>containerized-browser · live</title>
 <style>
-  :root { color-scheme: dark; }
+  :root { color-scheme: dark; --line: #1e2433; --accent: #58a6ff; --agent: #3fb950; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: #0b0e14; color: #c9d1d9;
     font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
   body { display: flex; flex-direction: column; }
   header { display: flex; align-items: center; gap: .6rem; padding: .5rem .8rem;
-    background: #11151f; border-bottom: 1px solid #1e2433; }
+    background: #11151f; border-bottom: 1px solid var(--line); }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: #f85149; transition: background .3s; }
-  .dot.live { background: #3fb950; box-shadow: 0 0 8px #3fb95088; }
+  .dot.live { background: var(--agent); box-shadow: 0 0 8px #3fb95088; }
   .title { font-weight: 600; color: #e6edf3; }
-  .meta { margin-left: auto; opacity: .6; }
-  main { flex: 1; display: grid; place-items: center; overflow: hidden; padding: .8rem; }
-  #screen { max-width: 100%; max-height: 100%; border: 1px solid #1e2433;
+  .spacer { flex: 1; }
+  .meta { opacity: .6; min-width: 4.5em; text-align: right; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  .mode { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .mode button { padding: .2rem .65rem; opacity: .65; }
+  .mode button + button { border-left: 1px solid var(--line); }
+  .mode button[aria-pressed="true"] { opacity: 1; background: #1f2633; color: #e6edf3; }
+
+  nav { display: flex; gap: 2px; padding: .35rem .8rem 0; background: #0e121a;
+    border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: thin; }
+  nav:empty { display: none; }
+  .tab { display: flex; align-items: center; gap: .45rem; max-width: 16rem; min-width: 6rem;
+    padding: .35rem .7rem; border: 1px solid transparent; border-bottom: 0;
+    border-radius: 6px 6px 0 0; opacity: .6; white-space: nowrap; }
+  .tab:hover { opacity: .9; background: #141a25; }
+  .tab.viewing { opacity: 1; background: #0b0e14; border-color: var(--line);
+    box-shadow: inset 0 2px 0 var(--accent); margin-bottom: -1px; }
+  .tab .label { overflow: hidden; text-overflow: ellipsis; }
+  .badge { flex: none; font-size: 10px; padding: 0 .35rem; border-radius: 3px;
+    color: #0b0e14; background: var(--agent); font-weight: 700; letter-spacing: .02em; }
+
+  #url { padding: .3rem .8rem; border-bottom: 1px solid var(--line); opacity: .7;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #url:empty { display: none; }
+
+  main { flex: 1; min-height: 0; overflow: hidden; padding: .8rem; }
+  /* minmax(0,1fr) pins the row to main's height so the frame scales down to fit */
+  #single { height: 100%; display: grid; place-items: center;
+    grid-template: minmax(0, 1fr) / minmax(0, 1fr); }
+  #screen { max-width: 100%; max-height: 100%; border: 1px solid var(--line);
     border-radius: 6px; box-shadow: 0 8px 40px #0006; background: #000; }
-  #empty { opacity: .45; }
+  .empty { opacity: .45; }
+
+  #grid { height: 100%; overflow: auto; display: grid; gap: .8rem; align-content: start;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); }
+  .tile { display: flex; flex-direction: column; text-align: left; padding: 0;
+    border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #11151f; }
+  .tile:hover { border-color: #30394d; }
+  .tile.agent { border-color: #2a5a35; }
+  .tile .cap { display: flex; align-items: center; gap: .45rem; padding: .35rem .55rem; }
+  .tile .cap .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile .shot { background: #000; display: grid; place-items: center; }
+  .tile .shot.waiting { aspect-ratio: 16 / 10; } /* placeholder until the first frame */
+  .tile img { width: 100%; height: auto; display: block; }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
@@ -27,32 +67,167 @@
     <span class="dot" id="dot"></span>
     <span class="title">containerized-browser</span>
     <span id="status">connecting…</span>
+    <span class="spacer"></span>
+    <div class="mode" role="group" aria-label="view mode">
+      <button id="follow" aria-pressed="true" title="Always show the tab the agent is driving">follow agent</button>
+      <button id="all" aria-pressed="false" title="Watch every open tab at once">all tabs</button>
+    </div>
     <span class="meta" id="fps"></span>
   </header>
+  <nav id="tabs" aria-label="open tabs"></nav>
+  <div id="url"></div>
   <main>
-    <img id="screen" alt="" hidden />
-    <div id="empty">waiting for first frame…</div>
+    <div id="single">
+      <img id="screen" alt="live view of the selected tab" hidden />
+      <div class="empty" id="empty">waiting for first frame…</div>
+    </div>
+    <div id="grid" hidden></div>
   </main>
 <script>
 (() => {
-  const dot = document.getElementById('dot');
-  const status = document.getElementById('status');
-  const fpsEl = document.getElementById('fps');
-  const img = document.getElementById('screen');
-  const empty = document.getElementById('empty');
+  const $ = (id) => document.getElementById(id);
+  const dot = $('dot'), status = $('status'), fpsEl = $('fps');
+  const followBtn = $('follow'), allBtn = $('all');
+  const tabsEl = $('tabs'), urlEl = $('url');
+  const single = $('single'), img = $('screen'), empty = $('empty'), grid = $('grid');
 
-  let frames = 0;
-  setInterval(() => { fpsEl.textContent = frames + ' fps'; frames = 0; }, 1000);
+  // Read-only: choosing a tab here only changes what THIS viewer watches; it never
+  // touches the agent's `page`.
+  let tabs = [];             // [{ id, title, url }] from the hub, in open order
+  let agent = null;          // tab id the agent's `page` points at
+  let mode = 'follow';       // 'follow' | 'pin' | 'all'
+  let pinned = null;         // tab id when mode === 'pin'
+  const frames = new Map();  // tab id -> latest frame (data URL)
+  const tiles = new Map();   // tab id -> grid tile elements
+  let ws = null;
+
+  let count = 0;
+  setInterval(() => { fpsEl.textContent = count + ' fps'; count = 0; }, 1000);
+
+  const label = (t) => t.title || t.url || 'about:blank';
+  const shownId = () => mode === 'pin' ? pinned
+    : mode === 'follow' ? (agent ?? (tabs.length ? tabs[tabs.length - 1].id : null))
+    : null;
+
+  function sendWatch() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const msg = mode === 'all' ? { all: true } : mode === 'pin' ? { ids: [pinned] } : { follow: true };
+    ws.send(JSON.stringify({ type: 'watch', ...msg }));
+  }
+
+  function setMode(m, id = null) {
+    mode = m; pinned = id;
+    sendWatch();
+    render();
+  }
+
+  function badge() {
+    const b = document.createElement('span');
+    b.className = 'badge'; b.textContent = 'AGENT';
+    b.title = 'the tab the agent is driving';
+    return b;
+  }
+
+  function showFrame(id) {
+    const src = frames.get(id);
+    if (src) { img.src = src; img.hidden = false; empty.hidden = true; }
+    else { img.hidden = true; empty.hidden = false; empty.textContent = id ? 'waiting for first frame…' : 'no open tabs'; }
+  }
+
+  function renderTabs() {
+    const viewing = shownId();
+    tabsEl.replaceChildren(...tabs.map((t) => {
+      const b = document.createElement('button');
+      b.className = 'tab' + (t.id === viewing ? ' viewing' : '');
+      b.title = t.url + (t.id === agent ? '\n(agent is driving this tab)' : '') + '\nclick to pin this tab';
+      const l = document.createElement('span');
+      l.className = 'label'; l.textContent = label(t);
+      b.append(l);
+      if (t.id === agent) b.append(badge());
+      b.onclick = () => setMode('pin', t.id);
+      return b;
+    }));
+  }
+
+  function renderGrid() {
+    for (const [id, el] of tiles) if (!tabs.some((t) => t.id === id)) { el.root.remove(); tiles.delete(id); }
+    for (const t of tabs) {
+      let el = tiles.get(t.id);
+      if (!el) {
+        const root = document.createElement('button');
+        root.className = 'tile';
+        root.onclick = () => setMode('pin', t.id);
+        const cap = document.createElement('div'); cap.className = 'cap';
+        const l = document.createElement('span'); l.className = 'label';
+        const shot = document.createElement('div'); shot.className = 'shot';
+        const im = document.createElement('img'); im.alt = '';
+        const wait = document.createElement('span'); wait.className = 'empty'; wait.textContent = 'waiting…';
+        cap.append(l); shot.append(im, wait); root.append(cap, shot);
+        el = { root, cap, label: l, shot, img: im, wait };
+        tiles.set(t.id, el);
+      }
+      el.label.textContent = label(t);
+      el.root.title = t.url + '\nclick to watch only this tab';
+      el.root.classList.toggle('agent', t.id === agent);
+      const hasBadge = el.cap.querySelector('.badge');
+      if (t.id === agent && !hasBadge) el.cap.append(badge());
+      if (t.id !== agent && hasBadge) hasBadge.remove();
+      const src = frames.get(t.id);
+      el.img.hidden = !src; el.wait.hidden = !!src; el.shot.classList.toggle('waiting', !src);
+      if (src && el.img.src !== src) el.img.src = src;
+      grid.append(el.root); // keeps tile order == tab order
+    }
+  }
+
+  function render() {
+    followBtn.setAttribute('aria-pressed', String(mode === 'follow'));
+    allBtn.setAttribute('aria-pressed', String(mode === 'all'));
+    renderTabs();
+    single.hidden = mode === 'all';
+    grid.hidden = mode !== 'all';
+    if (mode === 'all') { urlEl.textContent = ''; renderGrid(); return; }
+    const id = shownId();
+    const t = tabs.find((x) => x.id === id);
+    urlEl.textContent = t ? t.url : '';
+    showFrame(id);
+  }
+
+  function onTabs(msg) {
+    tabs = msg.tabs; agent = msg.agent;
+    const ids = new Set(tabs.map((t) => t.id));
+    for (const id of frames.keys()) if (!ids.has(id)) frames.delete(id);
+    if (mode === 'pin' && !ids.has(pinned)) { setMode('follow'); return; } // pinned tab closed
+    render();
+  }
+
+  function onFrame(msg) {
+    count++;
+    const src = 'data:image/jpeg;base64,' + msg.data;
+    frames.set(msg.id, src);
+    if (mode === 'all') {
+      const el = tiles.get(msg.id);
+      if (el) { el.img.src = src; el.img.hidden = false; el.wait.hidden = true; el.shot.classList.remove('waiting'); }
+    } else if (msg.id === shownId()) {
+      img.src = src;
+      if (img.hidden) { img.hidden = false; empty.hidden = true; }
+    }
+  }
+
+  followBtn.onclick = () => setMode('follow');
+  allBtn.onclick = () => setMode(mode === 'all' ? 'follow' : 'all');
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${location.host}/stream`);
-
-    ws.onopen = () => { dot.classList.add('live'); status.textContent = 'live'; };
+    ws = new WebSocket(`${proto}://${location.host}/stream`);
+    ws.onopen = () => {
+      dot.classList.add('live'); status.textContent = 'live';
+      if (mode !== 'follow') sendWatch(); // the hub starts every viewer in follow mode
+    };
     ws.onmessage = (ev) => {
-      frames++;
-      img.src = 'data:image/jpeg;base64,' + ev.data;
-      if (img.hidden) { img.hidden = false; empty.hidden = true; }
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.type === 'frame') onFrame(msg);
+      else if (msg.type === 'tabs') onTabs(msg);
     };
     const drop = () => {
       dot.classList.remove('live');
@@ -62,6 +237,7 @@
     ws.onclose = drop;
     ws.onerror = () => ws.close();
   }
+  render();
   connect();
 })();
 </script>

@@ -8,9 +8,9 @@
 //                   container) can connectOverCDP without hitting Chrome's DNS-rebinding
 //                   / host-header guard. The /json discovery responses are rewritten so
 //                   the advertised WebSocket URLs point back at this hub.
-//   3. /stream   -> a *separate* CDP client attaches to the live page, runs
-//                   Page.startScreencast, and broadcasts JPEG frames to every browser
-//                   watching the read-only viewer at /.
+//   3. /stream   -> a *separate* CDP client attaches to every open tab and
+//                   screencasts whichever tabs the read-only viewers at / are watching
+//                   (the agent's tab by default, any pinned tab, or all of them).
 //
 // Control (Playwright) and observation (screencast) are two independent CDP clients on
 // the same Chrome. CDP allows that, so they don't fight.
@@ -172,61 +172,193 @@ class CDP {
   on(fn) { this._handlers.push(fn); }
 }
 
-// --- 3. screencast: one CDP client -> all viewers --------------------------
+// --- 3. screencast: one CDP client, every tab, frames routed per viewer -----
+//
+// The hub tracks EVERY page target (tab), not just the newest. Each viewer picks
+// what it watches — `follow` (whatever tab the agent's `page` is; the default),
+// specific tab ids, or `all` (grid) — and the hub screencasts exactly the union of
+// what viewers watch, so tabs nobody is looking at cost nothing.
+//
+// Chrome only emits screencast frames when a page repaints, so a viewer joining a
+// static page used to see nothing. Now a tab that starts streaming gets Chrome's
+// initial frame (with a captureScreenshot fallback), and a tab that is already
+// streaming hands its cached last frame to anyone who starts watching it.
+//
+// /stream wire format — JSON text messages:
+//   hub -> viewer : { type: 'tabs', agent: <id|null>, tabs: [{ id, title, url }] }
+//                   { type: 'frame', id, data: <base64 jpeg> }
+//   viewer -> hub : { type: 'watch', follow: true } | { type: 'watch', all: true }
+//                   | { type: 'watch', ids: [id, ...] }
 
-const viewers = new Set();
-function broadcast(b64) {
-  for (const ws of viewers) {
-    if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 8 * 1024 * 1024) {
-      ws.send(b64);
+const tabs = new Map();    // targetId -> { id, title, url, sessionId, streaming, lastFrame }
+const viewers = new Map(); // ws -> { watch: {follow}|{all}|{ids}, shown: Set<targetId> }
+let agentTab = null;       // targetId of the controller's current `page`
+let castCdp = null;        // the screencaster's CDP client
+
+const isLive = (t) => !!(t && t.sessionId); // attached and ready to screencast
+
+function sendJson(ws, msg) {
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+}
+
+const frameMsg = (id, data) => JSON.stringify({ type: 'frame', id, data });
+
+function sendFrame(ws, msg) {
+  // drop frames for a viewer that can't keep up rather than buffer without bound
+  if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 8 * 1024 * 1024) ws.send(msg);
+}
+
+function tabsMessage() {
+  const list = [...tabs.values()].filter(isLive).map(({ id, title, url }) => ({ id, title, url }));
+  return { type: 'tabs', agent: agentTab, tabs: list };
+}
+
+function broadcastTabs() {
+  const msg = tabsMessage();
+  for (const ws of viewers.keys()) sendJson(ws, msg);
+}
+
+function watchedIds(v) {
+  const live = [...tabs.values()].filter(isLive).map((t) => t.id);
+  if (v.watch.all) return new Set(live);
+  if (v.watch.ids) return new Set(v.watch.ids.filter((id) => isLive(tabs.get(id))));
+  // follow: the agent's tab; until the controller has reported one, the newest tab
+  const id = agentTab ?? live[live.length - 1];
+  return new Set(isLive(tabs.get(id)) ? [id] : []);
+}
+
+// Recompute what every viewer sees, give each newly watched tab's cached frame
+// immediately, then start/stop per-tab screencasts so exactly the watched tabs stream.
+function refreshViewers() {
+  const needed = new Set();
+  for (const [ws, v] of viewers) {
+    const next = watchedIds(v);
+    for (const id of next) {
+      needed.add(id);
+      const t = tabs.get(id);
+      if (!v.shown.has(id) && t.lastFrame) sendFrame(ws, frameMsg(id, t.lastFrame));
     }
+    v.shown = next;
   }
+  for (const t of tabs.values()) {
+    if (!isLive(t)) continue;
+    if (needed.has(t.id) && !t.streaming) startCast(t);
+    else if (!needed.has(t.id) && t.streaming) stopCast(t);
+  }
+}
+
+function onFrame(t, data) {
+  t.lastFrame = data;
+  const msg = frameMsg(t.id, data); // serialize once, not per viewer
+  for (const [ws, v] of viewers) if (v.shown.has(t.id)) sendFrame(ws, msg);
+}
+
+async function startCast(t) {
+  t.streaming = true;
+  try {
+    await castCdp.send('Page.startScreencast',
+      { format: 'jpeg', quality: QUALITY, maxWidth: WIDTH, maxHeight: HEIGHT, everyNthFrame: 1 },
+      t.sessionId);
+  } catch (e) {
+    t.streaming = false;
+    log('screencast start failed:', e.message);
+    return;
+  }
+  // Chrome normally emits one frame right away even for a static page; if it
+  // doesn't (e.g. mid-navigation), grab one so the viewer is never left blank.
+  setTimeout(async () => {
+    if (!t.streaming || t.lastFrame || tabs.get(t.id) !== t) return;
+    try {
+      const { data } = await castCdp.send('Page.captureScreenshot',
+        { format: 'jpeg', quality: QUALITY }, t.sessionId);
+      if (t.streaming && !t.lastFrame) onFrame(t, data);
+    } catch (_) {}
+  }, 1000);
+}
+
+function stopCast(t) {
+  t.streaming = false;
+  t.lastFrame = null; // would go stale while not streaming
+  castCdp.send('Page.stopScreencast', {}, t.sessionId).catch(() => {});
+}
+
+function setAgentTab(id) {
+  if (id === agentTab) return;
+  agentTab = id;
+  broadcastTabs(); // before any frame of the new tab, so follow-mode viewers relabel first
+  refreshViewers();
 }
 
 async function startScreencaster() {
   const ver = await fetch(`${CHROME_BASE}/json/version`).then((r) => r.json());
-  const cdp = new CDP(ver.webSocketDebuggerUrl);
+  const cdp = (castCdp = new CDP(ver.webSocketDebuggerUrl));
   await cdp.ready;
-  await cdp.send('Target.setDiscoverTargets', { discover: true });
 
-  let session = null;   // active CDP session id
-  let target = null;    // active page target id
+  const isTab = (info) => info.type === 'page' && info.subtype !== 'prerender';
 
-  async function attach(targetId) {
-    if (target === targetId) return;
-    const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
-    session = sessionId;
-    target = targetId;
-    await cdp.send('Page.enable', {}, sessionId);
-    await cdp.send('Page.startScreencast',
-      { format: 'jpeg', quality: QUALITY, maxWidth: WIDTH, maxHeight: HEIGHT, everyNthFrame: 1 },
-      sessionId);
-    log('screencast attached to page', targetId);
+  // -> true if a live tab's title/url changed (i.e. viewers need a new tab list)
+  function updateInfo(info) {
+    const t = tabs.get(info.targetId);
+    if (!t || (t.title === info.title && t.url === info.url)) return false;
+    t.title = info.title;
+    t.url = info.url;
+    return isLive(t);
   }
 
-  cdp.on(async (msg) => {
+  async function attach(info) {
+    if (tabs.has(info.targetId)) return;
+    const t = { id: info.targetId, title: info.title, url: info.url,
+      sessionId: null, streaming: false, lastFrame: null };
+    tabs.set(t.id, t); // not live until attached; title/url updates still land on it
     try {
-      if (msg.method === 'Target.targetCreated' && msg.params.targetInfo.type === 'page') {
-        // newest page wins (e.g. Playwright opened a fresh tab)
-        await attach(msg.params.targetInfo.targetId);
-      } else if (msg.method === 'Target.targetDestroyed' && msg.params.targetId === target) {
-        session = null; target = null;
-        const { targetInfos } = await cdp.send('Target.getTargets');
-        const page = targetInfos.find((t) => t.type === 'page');
-        if (page) await attach(page.targetId);
-      } else if (msg.method === 'Page.screencastFrame' && msg.sessionId === session) {
-        broadcast(msg.params.data);
-        // MUST ack or Chrome stops sending frames
-        cdp.send('Page.screencastFrameAck', { sessionId: msg.params.sessionId }, session).catch(() => {});
-      }
+      const { sessionId } = await cdp.send('Target.attachToTarget', { targetId: t.id, flatten: true });
+      await cdp.send('Page.enable', {}, sessionId);
+      if (tabs.get(t.id) !== t) return; // closed while we were attaching
+      t.sessionId = sessionId;
+      broadcastTabs();
+      refreshViewers();
     } catch (e) {
-      log('screencaster error:', e.message);
+      if (tabs.get(t.id) === t) tabs.delete(t.id);
+      log('attach failed:', e.message);
+    }
+  }
+
+  cdp.on((msg) => {
+    const p = msg.params || {};
+    if (msg.method === 'Page.screencastFrame') {
+      // MUST ack or Chrome stops sending frames
+      cdp.send('Page.screencastFrameAck', { sessionId: p.sessionId }, msg.sessionId).catch(() => {});
+      for (const t of tabs.values()) {
+        if (t.sessionId === msg.sessionId) { if (t.streaming) onFrame(t, p.data); break; }
+      }
+    } else if (msg.method === 'Target.targetCreated' && isTab(p.targetInfo)) {
+      attach(p.targetInfo);
+    } else if (msg.method === 'Target.targetInfoChanged') {
+      if (updateInfo(p.targetInfo)) broadcastTabs();
+    } else if (msg.method === 'Target.targetDestroyed') {
+      const t = tabs.get(p.targetId);
+      if (t) {
+        tabs.delete(p.targetId);
+        t.streaming = false;
+        if (isLive(t)) { broadcastTabs(); refreshViewers(); }
+      }
     }
   });
 
-  const { targetInfos } = await cdp.send('Target.getTargets');
-  const page = targetInfos.find((t) => t.type === 'page');
-  if (page) await attach(page.targetId);
+  // discovery reports every existing tab as targetCreated, then keeps us posted
+  await cdp.send('Target.setDiscoverTargets', { discover: true });
+
+  // ...except about <title> changes, which Chrome doesn't announce. Poll for
+  // them, but only while someone is looking at the tab strip.
+  setInterval(async () => {
+    if (!viewers.size) return;
+    try {
+      const { targetInfos } = await cdp.send('Target.getTargets');
+      let changed = false;
+      for (const info of targetInfos) changed = updateInfo(info) || changed;
+      if (changed) broadcastTabs();
+    } catch (_) {}
+  }, 1000);
   log('screencaster ready');
 }
 
@@ -248,10 +380,39 @@ function allPages() {
   return pwBrowser ? pwBrowser.contexts().flatMap((c) => c.pages()) : [];
 }
 
+// Map a Playwright Page to its CDP targetId, so the viewer can mark (and follow)
+// the tab the agent is driving.
+const targetIds = new WeakMap();
+async function targetIdOf(page) {
+  if (!targetIds.has(page)) {
+    const s = await page.context().newCDPSession(page);
+    try {
+      targetIds.set(page, (await s.send('Target.getTargetInfo')).targetInfo.targetId);
+    } finally {
+      s.detach().catch(() => {});
+    }
+  }
+  return targetIds.get(page);
+}
+
+// Publish which tab `page` currently is. Never throws; fire-and-forget is fine.
+async function syncAgentTab() {
+  const p = currentPage;
+  let id = null;
+  if (p && !p.isClosed()) {
+    try { id = await targetIdOf(p); } catch (_) { return; }
+  }
+  if (p === currentPage) setAgentTab(id); // a newer sync owns it otherwise
+}
+
 function wireContext(ctx) {
-  ctx.on('page', (p) => {            // newest page wins, matching the viewer
+  ctx.on('page', (p) => {            // newest page wins; follow-mode viewers go with it
     currentPage = p;
-    p.on('close', () => { if (currentPage === p) currentPage = allPages().slice(-1)[0] || null; });
+    syncAgentTab();
+    p.on('close', () => {
+      if (currentPage === p) currentPage = allPages().slice(-1)[0] || null;
+      syncAgentTab();
+    });
   });
 }
 
@@ -260,6 +421,7 @@ async function startController() {
   pwBrowser.contexts().forEach(wireContext);
   const ctx = pwBrowser.contexts()[0] || (await pwBrowser.newContext());
   currentPage = ctx.pages()[0] || (await ctx.newPage());
+  await syncAgentTab();
   log('controller ready (playwright attached over CDP)');
 }
 
@@ -332,6 +494,8 @@ async function handleExec(req, res) {
     // 422 so `curl -f -o file` won't overwrite the target with an error body.
     res.writeHead(422, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: e.message, stack: e.stack, logs }));
+  } finally {
+    syncAgentTab(); // the snippet may have opened/closed tabs or re-pointed `page`
   }
 }
 
@@ -349,15 +513,19 @@ const GUIDE = (() => {
   catch { return '# guide unavailable\n'; }
 })();
 
-function serveStatic(req, res) {
-  const rel = req.url === '/' ? 'index.html' : req.url.replace(/^\//, '').split('?')[0];
+function serveStatic(res, pathname) {
+  // `pathname` is query-free: `/?token=...` must map to index.html, not to the
+  // public/ directory itself (reading a directory throws EISDIR and kills the hub).
+  const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\//, '');
   const file = path.join(STATIC_DIR, path.normalize(rel));
-  if (!file.startsWith(STATIC_DIR) || !fs.existsSync(file)) {
+  let isFile = false;
+  try { isFile = file.startsWith(STATIC_DIR + path.sep) && fs.statSync(file).isFile(); } catch (_) {}
+  if (!isFile) {
     res.writeHead(404).end('not found');
     return;
   }
   res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' });
-  fs.createReadStream(file).pipe(res);
+  fs.createReadStream(file).on('error', () => res.destroy()).pipe(res);
 }
 
 async function handleCdpJson(req, res, host) {
@@ -407,7 +575,7 @@ const server = http.createServer(async (req, res) => {
       req.url = req.url.replace(/^\/cdp/, '') || '/';
       cdpProxy.web(req, res);
     } else {
-      serveStatic(req, res);
+      serveStatic(res, p);
     }
   } catch (e) {
     log('http error:', e.message);
@@ -415,11 +583,27 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-const streamWss = new WebSocketServer({ noServer: true });
+const streamWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
 streamWss.on('connection', (ws) => {
-  viewers.add(ws);
+  viewers.set(ws, { watch: { follow: true }, shown: new Set() });
   log(`viewer connected (${viewers.size} total)`);
-  ws.on('close', () => { viewers.delete(ws); log(`viewer left (${viewers.size} total)`); });
+  sendJson(ws, tabsMessage());
+  refreshViewers(); // a newcomer gets the current frame now, not on the next repaint
+  ws.on('message', (buf) => {
+    let m;
+    try { m = JSON.parse(buf.toString()); } catch { return; }
+    const v = viewers.get(ws);
+    if (!v || !m || m.type !== 'watch') return;
+    v.watch = m.all ? { all: true }
+      : Array.isArray(m.ids) ? { ids: m.ids.map(String) }
+      : { follow: true };
+    refreshViewers();
+  });
+  ws.on('close', () => {
+    viewers.delete(ws);
+    refreshViewers(); // stop screencasting tabs nobody watches any more
+    log(`viewer left (${viewers.size} total)`);
+  });
   ws.on('error', () => {});
 });
 
