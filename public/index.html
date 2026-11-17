@@ -5,92 +5,136 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>containerized-browser · live</title>
 <style>
-  :root { color-scheme: dark; --line: #1e2433; --accent: #58a6ff; --agent: #3fb950; }
+  :root {
+    color-scheme: light dark;
+    --bg: #e5e5e5;          /* letterbox around the page frame */
+    --surface: #ffffff;
+    --panel: rgba(255, 255, 255, .86);
+    --border: #e0e0e0;
+    --border-strong: #c8c8c8;
+    --text: #171717;
+    --muted: #737373;
+    --pressed: rgba(0, 0, 0, .07);
+    --accent: #2563eb;
+    --accent-soft: rgba(37, 99, 235, .1);
+    --ok: #16a34a;
+    --bad: #dc2626;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 6px 20px rgba(0, 0, 0, .12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f0f0f;
+      --surface: #1c1c1c;
+      --panel: rgba(32, 32, 32, .86);
+      --border: #333333;
+      --border-strong: #4a4a4a;
+      --text: #ededed;
+      --muted: #a3a3a3;
+      --pressed: rgba(255, 255, 255, .1);
+      --accent: #60a5fa;
+      --accent-soft: rgba(96, 165, 250, .16);
+      --ok: #22c55e;
+      --bad: #ef4444;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .45);
+    }
+  }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: #0b0e14; color: #c9d1d9;
-    font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
-  body { display: flex; flex-direction: column; }
-  header { display: flex; align-items: center; gap: .6rem; padding: .5rem .8rem;
-    background: #11151f; border-bottom: 1px solid var(--line); }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: #f85149; transition: background .3s; }
-  .dot.live { background: var(--agent); box-shadow: 0 0 8px #3fb95088; }
-  .title { font-weight: 600; color: #e6edf3; }
-  .ver { opacity: .5; }
-  .spacer { flex: 1; }
-  .meta { opacity: .6; min-width: 4.5em; text-align: right; }
-  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
-  .mode { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-  .mode button { padding: .2rem .65rem; opacity: .65; }
-  .mode button + button { border-left: 1px solid var(--line); }
-  .mode button[aria-pressed="true"] { opacity: 1; background: #1f2633; color: #e6edf3; }
-
-  nav { display: flex; gap: 2px; padding: .35rem .8rem 0; background: #0e121a;
-    border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: thin; }
-  nav:empty { display: none; }
-  .tab { display: flex; align-items: center; gap: .45rem; max-width: 16rem; min-width: 6rem;
-    padding: .35rem .7rem; border: 1px solid transparent; border-bottom: 0;
-    border-radius: 6px 6px 0 0; opacity: .6; white-space: nowrap; }
-  .tab:hover { opacity: .9; background: #141a25; }
-  .tab.viewing { opacity: 1; background: #0b0e14; border-color: var(--line);
-    box-shadow: inset 0 2px 0 var(--accent); margin-bottom: -1px; }
-  .tab .label { overflow: hidden; text-overflow: ellipsis; }
-  .badge { flex: none; font-size: 10px; padding: 0 .35rem; border-radius: 3px;
-    color: #0b0e14; background: var(--agent); font-weight: 700; letter-spacing: .02em; }
-
-  #url { padding: .3rem .8rem; border-bottom: 1px solid var(--line); opacity: .7;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #url:empty { display: none; }
-
-  main { flex: 1; min-height: 0; overflow: hidden; padding: .8rem; }
-  /* minmax(0,1fr) pins the row to main's height so the frame scales down to fit */
-  #single { height: 100%; display: grid; place-items: center;
-    grid-template: minmax(0, 1fr) / minmax(0, 1fr); }
-  #screen { max-width: 100%; max-height: 100%; border: 1px solid var(--line);
-    border-radius: 6px; box-shadow: 0 8px 40px #0006; background: #000; }
-  .empty { opacity: .45; }
-
-  #grid { height: 100%; overflow: auto; display: grid; gap: .8rem; align-content: start;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); }
-  .tile { display: flex; flex-direction: column; text-align: left; padding: 0;
-    border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #11151f; }
-  .tile:hover { border-color: #30394d; }
-  .tile.agent { border-color: #2a5a35; }
-  .tile .cap { display: flex; align-items: center; gap: .45rem; padding: .35rem .55rem; }
-  .tile .cap .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tile .shot { background: #000; display: grid; place-items: center; }
-  .tile .shot.waiting { aspect-ratio: 16 / 10; } /* placeholder until the first frame */
-  .tile img { width: 100%; height: auto; display: block; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Noto Sans CJK KR", sans-serif;
+    -webkit-font-smoothing: antialiased; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   [hidden] { display: none !important; }
+
+  /* the page owns the whole window */
+  main { position: fixed; inset: 0; }
+  #single { position: absolute; inset: 0; display: grid; place-items: center; }
+  /* top-aligned, so any letterbox collects at the bottom, under the panel */
+  #screen { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center top; }
+  .empty { color: var(--muted); }
+
+  #grid { position: absolute; inset: 0; overflow: auto; display: grid; gap: 8px; align-content: start;
+    padding: 8px 8px 64px; /* bottom room so the last row can scroll clear of the panel */
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr)); }
+  .tile { display: flex; flex-direction: column; text-align: left; overflow: hidden;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+  .tile:hover { border-color: var(--border-strong); }
+  .tile.agent { border-color: var(--accent); }
+  .tile .cap { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; font-size: 12px;
+    white-space: nowrap; }
+  /* fixed-ratio thumbnails keep every row even; frames of another shape letterbox */
+  .tile .shot { display: grid; place-items: center; aspect-ratio: 16 / 9; background: var(--bg); }
+  .tile img { display: block; width: 100%; height: 100%; object-fit: contain; }
+
+  /* floating panel: bottom centre, fades out while the pointer is idle */
+  #panel { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 1;
+    width: max-content; max-width: calc(100% - 24px); margin: 0 auto; /* centred, shrinks to fit */
+    display: flex; align-items: center; gap: 4px; height: 40px; padding: 4px;
+    background: var(--panel); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow);
+    white-space: nowrap; transition: opacity .25s, transform .25s; }
+  #panel.idle { opacity: 0; transform: translateY(6px); pointer-events: none; }
+  .sep { flex: none; width: 1px; height: 18px; margin: 0 4px; background: var(--border); }
+
+  nav { flex: 0 1 auto; min-width: 0; height: 100%; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+  nav::-webkit-scrollbar { display: none; }
+  nav:empty, nav:empty + .sep { display: none; }
+  .tab { flex: 0 1 auto; min-width: 64px; max-width: 200px; height: 100%; display: flex; align-items: center;
+    gap: 6px; padding: 0 10px; border-radius: 6px; color: var(--muted); }
+  .tab:hover { color: var(--text); }
+  .tab.viewing { color: var(--text); background: var(--pressed); }
+  .label { overflow: hidden; text-overflow: ellipsis; }
+  .badge { flex: none; padding: 0 5px; border-radius: 4px; font-size: 11px; line-height: 17px;
+    font-weight: 500; color: var(--accent); background: var(--accent-soft); }
+  /* when space runs out the URL gives way first (huge shrink factor), then the tabs */
+  #url { flex: 0 1000 auto; min-width: 0; max-width: 320px; padding: 0 6px; color: var(--muted); font-size: 12px; }
+  #url span { display: block; overflow: hidden; text-overflow: ellipsis; }
+  #url:has(span:empty) { display: none; }
+  #url.stub span { visibility: hidden; } /* a stub like "ht…" says nothing */
+
+  .mode { flex: none; display: flex; gap: 2px; height: 100%; }
+  .mode button { padding: 0 10px; border-radius: 6px; color: var(--muted); font-size: 12px; }
+  .mode button:hover { color: var(--text); }
+  .mode button[aria-pressed="true"] { background: var(--pressed); color: var(--text); }
+  .status { flex: none; display: flex; align-items: center; gap: 6px; padding: 0 6px 0 8px;
+    color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .dot.live { background: var(--ok); }
+  .dot.down { background: var(--bad); }
+  #state { min-width: 3.4em; }
+  .ver { color: var(--muted); }
+  .ver:empty { display: none; }
 </style>
 </head>
 <body>
-  <header>
-    <span class="dot" id="dot"></span>
-    <span class="title">containerized-browser</span>
-    <span class="ver" id="ver" title="running release"></span>
-    <span id="status">connecting…</span>
-    <span class="spacer"></span>
-    <div class="mode" role="group" aria-label="view mode">
-      <button id="follow" aria-pressed="true" title="Always show the tab the agent is driving">follow agent</button>
-      <button id="all" aria-pressed="false" title="Watch every open tab at once">all tabs</button>
-    </div>
-    <span class="meta" id="fps"></span>
-  </header>
-  <nav id="tabs" aria-label="open tabs"></nav>
-  <div id="url"></div>
   <main>
     <div id="single">
       <img id="screen" alt="live view of the selected tab" hidden />
-      <div class="empty" id="empty">waiting for first frame…</div>
+      <div class="empty" id="empty">Waiting for first frame…</div>
     </div>
     <div id="grid" hidden></div>
   </main>
+  <div id="panel">
+    <nav id="tabs" aria-label="open tabs"></nav>
+    <span class="sep"></span>
+    <div id="url"><span id="urltext"></span></div>
+    <div class="mode" role="group" aria-label="view mode">
+      <button id="follow" aria-pressed="true" title="Always show the tab the agent is driving">Follow agent</button>
+      <button id="all" aria-pressed="false" title="Watch every open tab at once">All tabs</button>
+    </div>
+    <span class="sep"></span>
+    <span class="status" title="connection to the container · frames per second">
+      <span class="dot" id="dot"></span>
+      <span id="state">Connecting…</span>
+      <span class="ver" id="ver" title="running release"></span>
+    </span>
+  </div>
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const dot = $('dot'), status = $('status'), fpsEl = $('fps');
+  const dot = $('dot'), stateEl = $('state');
   const followBtn = $('follow'), allBtn = $('all');
-  const tabsEl = $('tabs'), urlEl = $('url');
+  const tabsEl = $('tabs'), urlEl = $('urltext');
   const single = $('single'), img = $('screen'), empty = $('empty'), grid = $('grid');
 
   // Read-only: choosing a tab here only changes what THIS viewer watches; it never
@@ -103,8 +147,27 @@
   const tiles = new Map();   // tab id -> grid tile elements
   let ws = null;
 
-  let count = 0;
-  setInterval(() => { fpsEl.textContent = count + ' fps'; count = 0; }, 1000);
+  let live = false, count = 0; // while live the status shows frames per second
+  setInterval(() => { if (live) stateEl.textContent = count + ' fps'; count = 0; }, 1000);
+
+  // The panel floats over the page, so it gets out of the way: it fades after a
+  // few idle seconds and comes back on any pointer/key activity. It never hides
+  // while hovered/focused or while the connection is down.
+  const panel = $('panel');
+  let idleTimer = 0;
+  function wake() {
+    panel.classList.remove('idle');
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      if (live && !panel.matches(':hover, :focus-within')) panel.classList.add('idle');
+      else wake();
+    }, 2500);
+  }
+  for (const ev of ['pointermove', 'pointerdown', 'keydown']) addEventListener(ev, wake, { passive: true });
+
+  // visibility (not display) so hiding the stub can't change the layout it reacts to
+  const urlBox = $('url');
+  new ResizeObserver(() => urlBox.classList.toggle('stub', urlBox.clientWidth < 90)).observe(urlBox);
 
   const label = (t) => t.title || t.url || 'about:blank';
   const shownId = () => mode === 'pin' ? pinned
@@ -125,7 +188,7 @@
 
   function badge() {
     const b = document.createElement('span');
-    b.className = 'badge'; b.textContent = 'AGENT';
+    b.className = 'badge'; b.textContent = 'Agent';
     b.title = 'the tab the agent is driving';
     return b;
   }
@@ -133,7 +196,7 @@
   function showFrame(id) {
     const src = frames.get(id);
     if (src) { img.src = src; img.hidden = false; empty.hidden = true; }
-    else { img.hidden = true; empty.hidden = false; empty.textContent = id ? 'waiting for first frame…' : 'no open tabs'; }
+    else { img.hidden = true; empty.hidden = false; empty.textContent = id ? 'Waiting for first frame…' : 'No open tabs'; }
   }
 
   function renderTabs() {
@@ -163,7 +226,7 @@
         const l = document.createElement('span'); l.className = 'label';
         const shot = document.createElement('div'); shot.className = 'shot';
         const im = document.createElement('img'); im.alt = '';
-        const wait = document.createElement('span'); wait.className = 'empty'; wait.textContent = 'waiting…';
+        const wait = document.createElement('span'); wait.className = 'empty'; wait.textContent = 'Waiting…';
         cap.append(l); shot.append(im, wait); root.append(cap, shot);
         el = { root, cap, label: l, shot, img: im, wait };
         tiles.set(t.id, el);
@@ -175,7 +238,7 @@
       if (t.id === agent && !hasBadge) el.cap.append(badge());
       if (t.id !== agent && hasBadge) hasBadge.remove();
       const src = frames.get(t.id);
-      el.img.hidden = !src; el.wait.hidden = !!src; el.shot.classList.toggle('waiting', !src);
+      el.img.hidden = !src; el.wait.hidden = !!src;
       if (src && el.img.src !== src) el.img.src = src;
       grid.append(el.root); // keeps tile order == tab order
     }
@@ -208,7 +271,7 @@
     frames.set(msg.id, src);
     if (mode === 'all') {
       const el = tiles.get(msg.id);
-      if (el) { el.img.src = src; el.img.hidden = false; el.wait.hidden = true; el.shot.classList.remove('waiting'); }
+      if (el) { el.img.src = src; el.img.hidden = false; el.wait.hidden = true; }
     } else if (msg.id === shownId()) {
       img.src = src;
       if (img.hidden) { img.hidden = false; empty.hidden = true; }
@@ -222,7 +285,7 @@
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}/stream`);
     ws.onopen = () => {
-      dot.classList.add('live'); status.textContent = 'live';
+      live = true; dot.className = 'dot live'; stateEl.textContent = 'Live';
       if (mode !== 'follow') sendWatch(); // the hub starts every viewer in follow mode
     };
     ws.onmessage = (ev) => {
@@ -232,8 +295,8 @@
       else if (msg.type === 'tabs') onTabs(msg);
     };
     const drop = () => {
-      dot.classList.remove('live');
-      status.textContent = 'reconnecting…';
+      live = false; dot.className = 'dot down'; wake();
+      stateEl.textContent = 'Reconnecting…';
       setTimeout(connect, 1000);
     };
     ws.onclose = drop;
@@ -245,6 +308,7 @@
 
   render();
   connect();
+  wake();
 })();
 </script>
 </body>

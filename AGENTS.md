@@ -64,7 +64,7 @@ A local build like this reports its version as `dev`.
   - the boot log line `VERSION=vN` (`docker logs cb | grep '^VERSION='`)
   - `GET /version`, which returns `{"version":"vN"}` and needs auth like
     every endpoint except `/guide`
-  - the viewer header
+  - the viewer's floating panel
 
 ## Docs: put each fact where its reader is
 

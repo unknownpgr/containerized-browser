@@ -50,9 +50,11 @@ them, briefly and in their language:
   agent) will drive on their behalf. They watch; they don't have to click.
 - **How to watch**: open **http://localhost:8080/** in their browser — it is a
   live, read-only screencast of the page you are controlling. Give them the
-  exact URL/port that is actually in use. It shows a strip of every open tab
-  and follows yours by default; they can click a tab to pin it, or
-  **all tabs** to see every tab live side by side.
+  exact URL/port that is actually in use. The page fills the window; a small
+  panel at the bottom (it hides while the mouse is idle; moving the mouse brings
+  it back) lists every open tab. The viewer follows your tab by default; they
+  can click a tab there to pin it, or **All tabs** to see every tab live side by
+  side.
 - **The workflow**: first you'll explore the site together by conversation
   (phase 1); then, on request, you'll turn what you did into a standalone script
   they can re-run later (phase 2).

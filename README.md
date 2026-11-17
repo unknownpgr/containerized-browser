@@ -64,7 +64,7 @@ This design is the endpoint of a few deliberate decisions:
 Pull and run the published image (no build needed):
 
 ```bash
-docker run --rm -d -p 8080:8080 --name cb unknownpgr/containerized-browser:v1
+docker run --rm -d -p 8080:8080 --name cb unknownpgr/containerized-browser:v2
 ```
 
 The tag is the current release (see [Versions](#versions)). `:latest` also
@@ -143,9 +143,11 @@ The same secret works two ways:
   untrusted pages. `--no-sandbox` is used (runs as root in the container).
 - **Newest page wins.** When a click opens a new tab, the controller's `page`
   follows it.
-- **Every tab is watchable.** The viewer shows a strip of all open tabs, with the
-  agent's tab marked. By default it follows the agent's tab; click any tab to
-  pin it, or **all tabs** for a live grid. A viewer that joins gets the current
+- **Every tab is watchable.** The page fills the viewer window. A small panel
+  floating at the bottom lists all open tabs, with the agent's tab marked; it
+  fades out while the mouse is idle and comes back when the mouse moves. By
+  default the viewer follows the agent's tab; click any tab to pin it, or
+  **All tabs** for a live grid. A viewer that joins gets the current
   frame right away, even if the page is static. Only tabs that someone is
   watching are screencast.
 - **Fonts.** Latin, CJK (Korean/Japanese/Chinese, via Noto CJK) and color emoji
@@ -164,7 +166,7 @@ To see which release a container is running, use any of these:
 
 - its log line `VERSION=vN` (`docker logs cb | grep '^VERSION='`)
 - `GET /version`
-- the viewer header
+- the viewer's floating panel
 - the `org.opencontainers.image.version` image label
 
 A local build reports `dev`. How a release is made is described in
@@ -174,6 +176,7 @@ A local build reports `dev`. How a release is made is described in
 
 | version | date | changes |
 |---------|------------|---------|
+| v2 | 2026-11-17 | Redesigned viewer. The page now fills the whole window, and the tabs, URL, view mode, connection status and version sit in a small panel floating at the bottom that fades out while the mouse is idle. The viewer uses the system font with a neutral look, follows the OS light/dark setting, and scales the page up to fit large windows. |
 | v1 | 2026-11-17 | First versioned release. The running version is shown in the log (`VERSION=v1`), at `GET /version` and in the viewer header, and the docs pin the release tag. The viewer can watch every tab: follow the agent (the default), pin a tab, or see all tabs as a live grid. A viewer that connects sees the current frame immediately, even on a static page. Korean, Japanese and Chinese fonts are bundled. Fixed a hub crash on `GET /?token=…`. |
 
 Images published before v1 (`:0.1.0` and older `:latest`s) are unversioned.
