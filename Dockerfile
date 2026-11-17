@@ -20,5 +20,12 @@ COPY server.js ./
 COPY GUIDE.md ./
 COPY public ./public
 
+# Release version (vN), injected by scripts/release.sh — see AGENTS.md. Kept
+# last so a version bump doesn't invalidate the cached apt/npm layers above.
+ARG VERSION=dev
+ENV CB_VERSION=$VERSION
+LABEL org.opencontainers.image.version=$VERSION \
+      org.opencontainers.image.source=https://github.com/unknownpgr/containerized-browser
+
 EXPOSE 8080
 CMD ["node", "server.js"]

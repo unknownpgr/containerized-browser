@@ -15,6 +15,7 @@
   .dot { width: 9px; height: 9px; border-radius: 50%; background: #f85149; transition: background .3s; }
   .dot.live { background: var(--agent); box-shadow: 0 0 8px #3fb95088; }
   .title { font-weight: 600; color: #e6edf3; }
+  .ver { opacity: .5; }
   .spacer { flex: 1; }
   .meta { opacity: .6; min-width: 4.5em; text-align: right; }
   button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
@@ -66,6 +67,7 @@
   <header>
     <span class="dot" id="dot"></span>
     <span class="title">containerized-browser</span>
+    <span class="ver" id="ver" title="running release"></span>
     <span id="status">connecting…</span>
     <span class="spacer"></span>
     <div class="mode" role="group" aria-label="view mode">
@@ -237,6 +239,10 @@
     ws.onclose = drop;
     ws.onerror = () => ws.close();
   }
+  // which release this container is (vN, or `dev` for an unreleased build)
+  fetch('/version').then((r) => (r.ok ? r.json() : null))
+    .then((j) => { if (j) $('ver').textContent = j.version; }).catch(() => {});
+
   render();
   connect();
 })();

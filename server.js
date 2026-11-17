@@ -32,6 +32,10 @@ const CHROME_BASE = `http://${CHROME_HOST}:${CHROME_PORT}`;
 const WIDTH = Number(process.env.VIEW_WIDTH || 1280);
 const HEIGHT = Number(process.env.VIEW_HEIGHT || 800);
 const QUALITY = Number(process.env.VIEW_QUALITY || 60);
+// Release version: an increasing integer `vN`, baked into the image by
+// scripts/release.sh (version.txt is the source of truth; package.json's
+// version is meaningless). Local/unreleased builds report `dev`.
+const VERSION = process.env.CB_VERSION || 'dev';
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -562,6 +566,9 @@ const server = http.createServer(async (req, res) => {
       `${COOKIE_NAME}=${encodeURIComponent(AUTH_PASSWORD)}; Path=/; HttpOnly; SameSite=Strict`);
     if (p === '/exec' && req.method === 'POST') {
       await handleExec(req, res);
+    } else if (p === '/version' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ version: VERSION }));
     } else if (p === '/session' && req.method === 'GET') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ steps: session }));
@@ -628,12 +635,13 @@ server.on('upgrade', (req, socket, head) => {
 // --- boot ------------------------------------------------------------------
 
 (async () => {
+  log(`containerized-browser ${VERSION} starting`);
   launchChrome();
   await waitForChrome();
   await startScreencaster();
   await startController();
   server.listen(PORT, () => {
-    log(`hub listening on http://0.0.0.0:${PORT}`);
+    log(`hub ${VERSION} listening on http://0.0.0.0:${PORT}`);
     log(`  viewer (read-only) : http://localhost:${PORT}/`);
     log(`  agent guide        : http://localhost:${PORT}/guide`);
     log(`  drive (code in)    : POST http://localhost:${PORT}/exec`);
@@ -655,5 +663,6 @@ server.on('upgrade', (req, socket, head) => {
     // Clean, machine-readable line so `docker logs | grep` extracts the exact
     // secret (the boxed line above is padded/bordered and grep-hostile).
     console.log(`AUTH_PASSWORD=${AUTH_PASSWORD}`);
+    console.log(`VERSION=${VERSION}`); // same grep-friendly form: which release is running
   });
 })().catch((e) => { log('fatal:', e); process.exit(1); });

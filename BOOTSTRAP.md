@@ -22,7 +22,7 @@ You drive it by `POST`ing JavaScript and reading JSON back, so the host needs
 1. **Run the container** (the user has `docker`):
 
    ```bash
-   docker run --rm -d -p 8080:8080 --name cb unknownpgr/containerized-browser:latest
+   docker run --rm -d -p 8080:8080 --name cb unknownpgr/containerized-browser:v1
    ```
 
    Use port `8080` unless the user wants another; map it the same on both sides.

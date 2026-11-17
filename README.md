@@ -64,8 +64,12 @@ This design is the endpoint of a few deliberate decisions:
 Pull and run the published image (no build needed):
 
 ```bash
-docker run --rm -d -p 8080:8080 --name cb unknownpgr/containerized-browser:latest
+docker run --rm -d -p 8080:8080 --name cb unknownpgr/containerized-browser:v1
 ```
+
+The tag is the current release (see [Versions](#versions)). `:latest` also
+exists, but `docker run` silently reuses a stale cached `:latest` instead of
+pulling the new one.
 
 Or build from source:
 
@@ -94,6 +98,7 @@ docker run --rm -d -p 8080:8080 --name cb containerized-browser
 | POST   | `/exec`          | run async JS with `{ page, context, browser, log }`; JSON result, or raw bytes if the snippet returns a Buffer (e.g. `page.screenshot()`, `page.pdf()`) |
 | GET    | `/session`       | recorded successful snippets, in order (for codify) |
 | POST   | `/session/reset` | clear the recording                              |
+| GET    | `/version`       | the running release, e.g. `{"version":"v1"}`     |
 | GET    | `/cdp`           | raw CDP endpoint for an external Playwright       |
 | WS     | `/stream`        | viewer feed: tab list + JPEG frames of the tabs it watches |
 
@@ -148,3 +153,27 @@ The same secret works two ways:
 - **Frame-based, not video.** Fine for dev; swap to WebRTC if you need smooth
   60fps.
 - No audio; the viewer is observation-only by design.
+
+## Versions
+
+Releases are numbered with plain increasing integers (`v1`, `v2`, …), because
+there is no major/minor/patch for an API server. Each one is published as the
+immutable image tag `:vN` and also moves `:latest`.
+
+To see which release a container is running, use any of these:
+
+- its log line `VERSION=vN` (`docker logs cb | grep '^VERSION='`)
+- `GET /version`
+- the viewer header
+- the `org.opencontainers.image.version` image label
+
+A local build reports `dev`. How a release is made is described in
+[AGENTS.md](./AGENTS.md).
+
+## Release notes
+
+| version | date | changes |
+|---------|------------|---------|
+| v1 | 2026-11-17 | First versioned release. The running version is shown in the log (`VERSION=v1`), at `GET /version` and in the viewer header, and the docs pin the release tag. The viewer can watch every tab: follow the agent (the default), pin a tab, or see all tabs as a live grid. A viewer that connects sees the current frame immediately, even on a static page. Korean, Japanese and Chinese fonts are bundled. Fixed a hub crash on `GET /?token=…`. |
+
+Images published before v1 (`:0.1.0` and older `:latest`s) are unversioned.

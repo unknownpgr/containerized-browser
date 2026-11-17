@@ -193,6 +193,7 @@ All paths require the password (§0a) **except `/guide`**, which is public.
 | POST   | `/exec`          | yes  | run an async JS snippet; JSON result, or raw bytes if it returns a Buffer |
 | GET    | `/session`       | yes  | recorded successful snippets, in order   |
 | POST   | `/session/reset` | yes  | clear the recording                      |
+| GET    | `/version`       | yes  | running release, e.g. `{"version":"v1"}` |
 | GET    | `/cdp`           | yes  | raw CDP endpoint (for external Playwright)|
 
 ---
