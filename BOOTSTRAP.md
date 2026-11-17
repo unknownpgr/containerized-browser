@@ -22,7 +22,7 @@ You drive it by `POST`ing JavaScript and reading JSON back, so the host needs
 1. **Run the container** (the user has `docker`):
 
    ```bash
-   docker run --rm -d -p 8080:8080 --name cb unknownpgr/containerized-browser:v2
+   docker run --rm -d -p 8080:8080 --name cb unknownpgr/containerized-browser:v3
    ```
 
    Use port `8080` unless the user wants another; map it the same on both sides.
@@ -55,8 +55,8 @@ You drive it by `POST`ing JavaScript and reading JSON back, so the host needs
    Before driving the browser, tell them in their own language:
    - what this is (a real browser you'll drive for them),
    - that they can **watch it live at `http://localhost:8080/`** (give the actual
-     port) — the browser will prompt for a login: any username, and the password
-     from step 2a — and that the viewer is read-only,
+     port) — it opens with a sign-in page that asks for the password from
+     step 2a — and that the viewer is read-only,
    - that you'll first explore together, then can produce a re-runnable script.
 
 Then start helping them with their task.

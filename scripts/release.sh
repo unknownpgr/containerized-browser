@@ -5,7 +5,7 @@
 #
 # 1. reads the last released version N from version.txt and picks v(N+1)
 # 2. builds the image from the working tree with that version baked in
-# 3. smoke-tests the exact image (version reported, auth enforced, /exec works)
+# 3. smoke-tests the exact image (version reported, auth enforced, sign-in, /exec works)
 # 4. pushes :v(N+1) and :latest, recording N+1 in version.txt
 # 5. re-pins the image tag in BOOTSTRAP.md / README.md run commands to v(N+1)
 #
@@ -49,6 +49,9 @@ docker logs "$name" 2>&1 | grep -qx "VERSION=$tag" || fail "boot log is missing 
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "$base/version")" == 401 ]] || fail "auth is not enforced"
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "$base/guide")" == 200 ]] || fail "/guide is not served"
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "${auth[@]}" "$base/")" == 200 ]] || fail "viewer is not served"
+[[ "$(curl -s -H 'Accept: text/html' "$base/")" == *'id="pw"'* ]] || fail "sign-in page is not served"
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST --data-urlencode "password=$pass" "$base/login")" == 204 ]] \
+  || fail "signing in at /login failed"
 out="$(curl -s "${auth[@]}" -X POST "$base/exec" \
   --data-binary 'await page.setContent("<title>smoke</title>"); return await page.title()' || true)"
 [[ "$out" == *'"result":"smoke"'* ]] || fail "/exec failed: $out"

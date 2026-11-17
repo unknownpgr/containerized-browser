@@ -47,14 +47,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // from $AUTH_PASSWORD; if unset we mint a random one and print it at boot so the
 // tool is never silently unprotected.
 //
-// The same secret is accepted as, in priority order:
+// The same secret is accepted as any of (a request passes if one matches):
 //   - `Authorization: Bearer <secret>`  (agent / curl)
-//   - `Authorization: Basic <user:secret>` (browser native login — any username)
-//   - cookie `cb_auth=<secret>`          (set after a browser logs in, so the
-//                                          /stream WebSocket handshake — which
-//                                          can't carry an Authorization header —
+//   - `Authorization: Basic <user:secret>` (`curl -u any:<secret>`)
+//   - cookie `cb_auth=<secret>`          (set by the login page and on every
+//                                          authed response, so the /stream
+//                                          WebSocket handshake — which can't
+//                                          carry an Authorization header —
 //                                          authenticates automatically)
 //   - `?token=<secret>` query param      (WebSocket clients / quick curl)
+//
+// Humans never see a native browser auth prompt: an unauthenticated page load
+// gets the login page (public/login.html), which POSTs to /login for the cookie.
 
 const COOKIE_NAME = 'cb_auth';
 let AUTH_PASSWORD = process.env.AUTH_PASSWORD || '';
@@ -69,17 +73,20 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(ba, bb);
 }
 
-function presentedSecret(req) {
+// Every secret the request carries. All are checked, so a stale credential in
+// one place (say, old cached Basic auth) can't shadow a good login cookie.
+function presentedSecrets(req) {
+  const found = [];
   const h = req.headers['authorization'];
   if (h) {
     const sp = h.indexOf(' ');
     const scheme = (sp === -1 ? h : h.slice(0, sp)).toLowerCase();
     const val = sp === -1 ? '' : h.slice(sp + 1).trim();
-    if (scheme === 'bearer' && val) return val;
+    if (scheme === 'bearer' && val) found.push(val);
     if (scheme === 'basic' && val) {
       const dec = Buffer.from(val, 'base64').toString();
       const i = dec.indexOf(':');               // strip the username
-      return i === -1 ? dec : dec.slice(i + 1);
+      found.push(i === -1 ? dec : dec.slice(i + 1));
     }
   }
   const cookie = req.headers['cookie'];
@@ -88,21 +95,23 @@ function presentedSecret(req) {
       const i = part.indexOf('=');
       if (i === -1) continue;
       if (part.slice(0, i).trim() === COOKIE_NAME) {
-        return decodeURIComponent(part.slice(i + 1).trim());
+        try { found.push(decodeURIComponent(part.slice(i + 1).trim())); } catch (_) {}
       }
     }
   }
   try {
     const t = new URL(req.url, 'http://localhost').searchParams.get('token');
-    if (t) return t;
+    if (t) found.push(t);
   } catch (_) {}
-  return null;
+  return found;
 }
 
 function isAuthed(req) {
-  const s = presentedSecret(req);
-  return s != null && safeEqual(s, AUTH_PASSWORD);
+  return presentedSecrets(req).some((s) => safeEqual(s, AUTH_PASSWORD));
 }
+
+const authCookie = () =>
+  `${COOKIE_NAME}=${encodeURIComponent(AUTH_PASSWORD)}; Path=/; HttpOnly; SameSite=Strict`;
 
 // --- 1. launch Chromium ----------------------------------------------------
 
@@ -440,10 +449,15 @@ async function getPage() {
   return currentPage;
 }
 
-function readBody(req) {
+function readBody(req, limit = Infinity) {
   return new Promise((resolve, reject) => {
     let d = '';
-    req.on('data', (c) => (d += c));
+    const onData = (c) => {
+      d += c;
+      // over the cap: stop buffering, drain the rest unread and let the caller answer
+      if (d.length > limit) { req.off('data', onData); req.resume(); reject(new Error('body too large')); }
+    };
+    req.on('data', onData);
     req.on('end', () => resolve(d));
     req.on('error', reject);
   });
@@ -532,6 +546,34 @@ function serveStatic(res, pathname) {
   fs.createReadStream(file).on('error', () => res.destroy()).pipe(res);
 }
 
+// The human-facing login form. Served in place of any page an unauthenticated
+// browser asks for (so it lands back on that page after signing in), and at
+// /login itself.
+function sendLoginPage(res, status) {
+  res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+  fs.createReadStream(path.join(STATIC_DIR, 'login.html')).on('error', () => res.end()).pipe(res);
+}
+
+// A page navigation from a browser, as opposed to curl / fetch / an agent.
+const wantsHtml = (req) => req.method === 'GET' && /\btext\/html\b/.test(req.headers['accept'] || '');
+
+// POST /login with a form-encoded `password`: 204 + auth cookie, or 401.
+async function handleLogin(req, res) {
+  let body;
+  try { body = await readBody(req, 4096); } catch (_) {
+    res.writeHead(413, { connection: 'close' }).end();
+    return;
+  }
+  const pw = new URLSearchParams(body).get('password') || '';
+  if (!safeEqual(pw, AUTH_PASSWORD)) {
+    res.writeHead(401, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'wrong password' }));
+    return;
+  }
+  res.writeHead(204, { 'Set-Cookie': authCookie() });
+  res.end();
+}
+
 async function handleCdpJson(req, res, host) {
   // forward Chrome's /json discovery, rewrite advertised ws urls back to this hub
   const upstream = req.url.replace(/^\/cdp/, '');
@@ -553,17 +595,25 @@ const server = http.createServer(async (req, res) => {
       res.end(GUIDE);
       return;
     }
-    if (!isAuthed(req)) {
-      res.writeHead(401, {
-        'WWW-Authenticate': 'Basic realm="containerized-browser", charset="UTF-8"',
-        'content-type': 'text/plain; charset=utf-8',
-      });
-      res.end('401 Unauthorized — supply the password (Basic auth, Bearer token, or ?token=).\n');
+    if (p === '/login') {
+      if (req.method === 'POST') await handleLogin(req, res);
+      else if (isAuthed(req)) res.writeHead(303, { location: '/' }).end();
+      else sendLoginPage(res, 200);
       return;
     }
-    // Bridge browser logins to the cookie that the /stream WS handshake needs.
-    res.setHeader('Set-Cookie',
-      `${COOKIE_NAME}=${encodeURIComponent(AUTH_PASSWORD)}; Path=/; HttpOnly; SameSite=Strict`);
+    if (!isAuthed(req)) {
+      if (wantsHtml(req)) { sendLoginPage(res, 401); return; }
+      // Bearer, not Basic: Basic would make browsers pop their native prompt.
+      res.writeHead(401, {
+        'WWW-Authenticate': 'Bearer realm="containerized-browser"',
+        'content-type': 'text/plain; charset=utf-8',
+      });
+      res.end('401 Unauthorized — supply the password (Bearer token, ?token=, or Basic auth).\n');
+      return;
+    }
+    // Bridge every authed request (e.g. /?token=…) to the cookie that the
+    // /stream WS handshake needs.
+    res.setHeader('Set-Cookie', authCookie());
     if (p === '/exec' && req.method === 'POST') {
       await handleExec(req, res);
     } else if (p === '/version' && req.method === 'GET') {

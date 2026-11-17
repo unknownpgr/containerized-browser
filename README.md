@@ -64,7 +64,7 @@ This design is the endpoint of a few deliberate decisions:
 Pull and run the published image (no build needed):
 
 ```bash
-docker run --rm -d -p 8080:8080 --name cb unknownpgr/containerized-browser:v2
+docker run --rm -d -p 8080:8080 --name cb unknownpgr/containerized-browser:v3
 ```
 
 The tag is the current release (see [Versions](#versions)). `:latest` also
@@ -99,11 +99,14 @@ docker run --rm -d -p 8080:8080 --name cb containerized-browser
 | GET    | `/session`       | recorded successful snippets, in order (for codify) |
 | POST   | `/session/reset` | clear the recording                              |
 | GET    | `/version`       | the running release, e.g. `{"version":"v1"}`     |
+| POST   | `/login`         | sign-in page's form post (`password=…`): sets the auth cookie |
 | GET    | `/cdp`           | raw CDP endpoint for an external Playwright       |
 | WS     | `/stream`        | viewer feed: tab list + JPEG frames of the tabs it watches |
 
 All paths require the password (see [Auth](#auth)) **except `/guide`**, which is
-public so an agent can read it before it has the secret.
+public so an agent can read it before it has the secret, and `/login`. A
+browser that opens any other page without the password gets the sign-in page
+instead.
 
 ## Knobs (env vars)
 
@@ -126,8 +129,8 @@ shared secret:
 
 The same secret works two ways:
 
-- **Human (viewer):** open `/` in a browser; it prompts for a login — any
-  username, the secret as the password.
+- **Human (viewer):** open `/` in a browser; it shows a sign-in page that asks
+  for the secret. Signing in sets a cookie for the rest of the browser session.
 - **Agent (curl / Playwright):** send `Authorization: Bearer <secret>` (or append
   `?token=<secret>`). Example:
 
@@ -176,6 +179,7 @@ A local build reports `dev`. How a release is made is described in
 
 | version | date | changes |
 |---------|------------|---------|
+| v3 | 2026-11-17 | The viewer has its own sign-in page instead of the browser's native login prompt; a browser that opens any page without the password lands there, and returns to that page after signing in. New `POST /login`. If the container restarts with a different password, an open viewer goes back to the sign-in page by itself. Agents are unaffected: Bearer, `?token=` and `curl -u` all work as before. |
 | v2 | 2026-11-17 | Redesigned viewer. The page now fills the whole window, and the tabs, URL, view mode, connection status and version sit in a small panel floating at the bottom that fades out while the mouse is idle. The viewer uses the system font with a neutral look, follows the OS light/dark setting, and scales the page up to fit large windows. |
 | v1 | 2026-11-17 | First versioned release. The running version is shown in the log (`VERSION=v1`), at `GET /version` and in the viewer header, and the docs pin the release tag. The viewer can watch every tab: follow the agent (the default), pin a tab, or see all tabs as a live grid. A viewer that connects sees the current frame immediately, even on a static page. Korean, Japanese and Chinese fonts are bundled. Fixed a hub crash on `GET /?token=…`. |
 

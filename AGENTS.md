@@ -2,7 +2,8 @@
 
 containerized-browser is one container: headless Chromium plus a Node hub
 (`server.js`) that exposes `/exec`, `/session`, `/cdp`, a live viewer at `/`
-(`public/index.html`) and the agent manual at `/guide` (`GUIDE.md`). README.md
+(`public/index.html`, behind the sign-in page `public/login.html`) and the
+agent manual at `/guide` (`GUIDE.md`). README.md
 explains the design.
 
 ## Development procedure
@@ -14,7 +15,7 @@ four have happened.
 2. **Release the image** by running `scripts/release.sh`. It:
    - bumps the version by one (`version.txt`: N → N+1),
    - builds the image from the working tree with `vN+1` baked in,
-   - smoke-tests that exact image (reported version, auth, viewer, `/exec`),
+   - smoke-tests that exact image (reported version, auth, sign-in, viewer, `/exec`),
    - pushes `unknownpgr/containerized-browser:vN+1` and `:latest`,
    - re-pins the image tag in the `docker run` commands of BOOTSTRAP.md and
      README.md to `vN+1`.

@@ -32,8 +32,8 @@ curl -s -H "Authorization: Bearer $AUTH" localhost:8080/session
 curl -s 'localhost:8080/session?token='"$AUTH"     # equivalent
 ```
 
-Tell the **human** the same password — they type it into the browser when the
-viewer at `/` prompts for a login (any username, this as the password).
+Tell the **human** the same password — the viewer at `/` opens with a sign-in
+page, and they enter it there.
 
 In the curl examples below, assume `-H "Authorization: Bearer $AUTH"` is added to
 every call (omitted for brevity).

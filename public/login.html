@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sign in · containerized-browser</title>
+<style>
+  /* same tokens as the viewer (index.html) */
+  :root {
+    color-scheme: light dark;
+    --bg: #e5e5e5;
+    --surface: #ffffff;
+    --border: #e0e0e0;
+    --border-strong: #c8c8c8;
+    --text: #171717;
+    --muted: #737373;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --on-accent: #ffffff;
+    --bad: #dc2626;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 6px 20px rgba(0, 0, 0, .12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f0f0f;
+      --surface: #1c1c1c;
+      --border: #333333;
+      --border-strong: #4a4a4a;
+      --text: #ededed;
+      --muted: #a3a3a3;
+      --accent: #60a5fa;
+      --accent-hover: #93c5fd;
+      --on-accent: #0f0f0f;
+      --bad: #f87171;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .45);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Noto Sans CJK KR", sans-serif;
+    -webkit-font-smoothing: antialiased; }
+  body { display: grid; place-items: center; padding: 16px; }
+
+  .card { width: 100%; max-width: 340px; padding: 24px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
+  h1 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+  .sub { margin: 0 0 20px; color: var(--muted); }
+
+  label { display: block; margin-bottom: 6px; font-weight: 500; }
+  input { display: block; width: 100%; height: 36px; padding: 0 10px; font: inherit; color: inherit;
+    background: transparent; border: 1px solid var(--border-strong); border-radius: 6px; }
+  input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+  input[aria-invalid="true"] { border-color: var(--bad); }
+  input[aria-invalid="true"]:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 20%, transparent); }
+  .err { margin: 6px 0 0; color: var(--bad); font-size: 12px; }
+
+  button { display: block; width: 100%; height: 36px; margin-top: 16px; font: inherit; font-weight: 500;
+    color: var(--on-accent); background: var(--accent); border: 0; border-radius: 6px; cursor: pointer; }
+  button:hover { background: var(--accent-hover); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button:disabled { opacity: .6; cursor: default; }
+
+  .hint { margin: 20px 0 0; padding-top: 16px; border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 12px; }
+  code { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <h1>containerized-browser</h1>
+    <p class="sub">Enter the password to watch this container's browser.</p>
+    <form id="form" novalidate>
+      <label for="pw">Password</label>
+      <input id="pw" name="password" type="password" autocomplete="current-password" autofocus required />
+      <p class="err" id="err" role="alert" hidden></p>
+      <button id="go" type="submit">Sign in</button>
+    </form>
+    <p class="hint">
+      Unless it was set with <code>-e AUTH_PASSWORD</code>, find it in the
+      container's log, on the line starting with <code>AUTH_PASSWORD=</code>
+    </p>
+  </main>
+<script>
+(() => {
+  const form = document.getElementById('form');
+  const pw = document.getElementById('pw');
+  const err = document.getElementById('err');
+  const go = document.getElementById('go');
+
+  function fail(msg) {
+    err.textContent = msg; err.hidden = false;
+    pw.setAttribute('aria-invalid', 'true');
+    go.disabled = false; go.textContent = 'Sign in';
+    pw.select();
+  }
+
+  pw.addEventListener('input', () => { err.hidden = true; pw.removeAttribute('aria-invalid'); });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!pw.value) return fail('Enter the password.');
+    go.disabled = true; go.textContent = 'Signing in…';
+    let r;
+    try {
+      r = await fetch('/login', { method: 'POST', body: new URLSearchParams({ password: pw.value }) });
+    } catch {
+      return fail('Could not reach the container.');
+    }
+    if (r.status === 401) return fail('Wrong password.');
+    if (!r.ok) return fail(`Sign-in failed (${r.status}).`);
+    // This page stands in for whatever was asked for; load it again, now signed in.
+    location.replace(location.pathname === '/login' ? '/' : location.href);
+  });
+})();
+</script>
+</body>
+</html>

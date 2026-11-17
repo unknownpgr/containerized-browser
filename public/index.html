@@ -297,6 +297,9 @@
     const drop = () => {
       live = false; dot.className = 'dot down'; wake();
       stateEl.textContent = 'Reconnecting…';
+      // Signed out (e.g. the container restarted with a new password)? Then
+      // retrying is pointless; reload, which lands on the login page.
+      fetch('/version').then((r) => { if (r.status === 401) location.reload(); }).catch(() => {});
       setTimeout(connect, 1000);
     };
     ws.onclose = drop;
