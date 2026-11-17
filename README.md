@@ -143,6 +143,8 @@ The same secret works two ways:
   pin it, or **all tabs** for a live grid. A viewer that joins gets the current
   frame right away, even if the page is static. Only tabs that someone is
   watching are screencast.
+- **Fonts.** Latin, CJK (Korean/Japanese/Chinese, via Noto CJK) and color emoji
+  are bundled. Other scripts (e.g. Arabic, Thai) may render as tofu (□).
 - **Frame-based, not video.** Fine for dev; swap to WebRTC if you need smooth
   60fps.
 - No audio; the viewer is observation-only by design.

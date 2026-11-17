@@ -1,9 +1,11 @@
 FROM node:20-bookworm-slim
 
-# chromium + fonts so headless rendering (and screencast) actually has glyphs
+# chromium + fonts so headless rendering (and screencast) actually has glyphs.
+# fonts-noto-cjk: Korean/Japanese/Chinese — without it Hangul renders as tofu (□).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       chromium \
       fonts-liberation \
+      fonts-noto-cjk \
       fonts-noto-color-emoji \
       ca-certificates \
     && rm -rf /var/lib/apt/lists/*
