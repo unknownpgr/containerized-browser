@@ -3,7 +3,8 @@
 // containerized-browser hub
 // -------------------------
 // One Node process, one exposed port (8080), three jobs:
-//   1. launch a headless Chromium with remote debugging on 127.0.0.1:9222
+//   1. launch Chromium — a normal desktop window on a virtual screen (Xvfb), not
+//      --headless — with remote debugging on 127.0.0.1:9222
 //   2. /cdp/*    -> reverse-proxy Chrome's CDP endpoint so Playwright (outside the
 //                   container) can connectOverCDP without hitting Chrome's DNS-rebinding
 //                   / host-header guard. The /json discovery responses are rewritten so
@@ -14,24 +15,36 @@
 //
 // Control (Playwright) and observation (screencast) are two independent CDP clients on
 // the same Chrome. CDP allows that, so they don't fight.
+//
+// The controller is Patchright, a drop-in Playwright fork: stock Playwright sends
+// CDP `Runtime.enable` to every page, and bot detection can see that a page's
+// runtime is being watched. The screencaster only uses the Page domain, which
+// pages can't observe.
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
+const readline = require('readline');
+const { spawn, execFile } = require('child_process');
 const httpProxy = require('http-proxy');
 const { WebSocket, WebSocketServer } = require('ws');
-const pw = require('playwright-core');
+const pw = require('patchright-core'); // Playwright's API, minus its automation tells
 
 const PORT = Number(process.env.PORT || 8080);
 const CHROME_BIN = process.env.CHROME_BIN || '/usr/bin/chromium';
 const CHROME_HOST = '127.0.0.1';
 const CHROME_PORT = Number(process.env.CHROME_PORT || 9222);
 const CHROME_BASE = `http://${CHROME_HOST}:${CHROME_PORT}`;
-const WIDTH = Number(process.env.VIEW_WIDTH || 1280);
-const HEIGHT = Number(process.env.VIEW_HEIGHT || 800);
+// The virtual screen (headful) or window (HEADLESS=1) size.
+const WIDTH = Number(process.env.VIEW_WIDTH || 1920);
+const HEIGHT = Number(process.env.VIEW_HEIGHT || 1080);
 const QUALITY = Number(process.env.VIEW_QUALITY || 60);
+const HEADLESS = /^(1|true|yes)$/i.test(process.env.HEADLESS || '');
+const DISPLAY = ':99'; // the Xvfb screen Chromium runs on
+// Height of the strip at the bottom of the screen that the browser window leaves
+// free, as a desktop taskbar would.
+const TASKBAR = 40;
 // Release version: an increasing integer `vN`, baked into the image by
 // scripts/release.sh (version.txt is the source of truth; package.json's
 // version is meaningless). Local/unreleased builds report `dev`.
@@ -114,23 +127,79 @@ const authCookie = () =>
   `${COOKIE_NAME}=${encodeURIComponent(AUTH_PASSWORD)}; Path=/; HttpOnly; SameSite=Strict`;
 
 // --- 1. launch Chromium ----------------------------------------------------
+//
+// By default Chromium runs headFUL on a virtual X display (Xvfb), not with
+// --headless. Sites that block bots look for headless tells — "HeadlessChrome"
+// in the user agent, a screen smaller than the window, no mouse, no scrollbars,
+// no WebGL — and a real browser window on a real (virtual) screen has none of
+// them: it is the same desktop Chromium a person would run. HEADLESS=1 brings
+// back the old --headless mode.
+
+async function startDisplay() {
+  const socket = '/tmp/.X11-unix/X' + DISPLAY.slice(1);
+  // after `docker restart` the previous server's lock and socket are still here
+  for (const f of [`/tmp/.X${DISPLAY.slice(1)}-lock`, socket]) fs.rmSync(f, { force: true });
+  // -noreset: keep the root window's properties (the work area set below) when
+  // the last X client disconnects
+  const args = [DISPLAY, '-screen', '0', `${WIDTH}x${HEIGHT}x24`, '-nolisten', 'tcp', '-noreset'];
+  log('launching Xvfb:', args.join(' '));
+  const proc = spawn('Xvfb', args, { stdio: ['ignore', 'inherit', 'inherit'] });
+  proc.on('exit', (code) => {
+    log(`Xvfb exited (${code}) — shutting down hub`);
+    process.exit(code ?? 1);
+  });
+  for (let i = 0; !fs.existsSync(socket); i++) {
+    if (i === 100) throw new Error('Xvfb did not come up on ' + DISPLAY);
+    await sleep(100);
+  }
+  // Every real desktop has a taskbar or panel, so screen.availHeight is less
+  // than screen.height. Reserve one, the way a window manager announces it.
+  const workArea = `0, 0, ${WIDTH}, ${HEIGHT - TASKBAR}`;
+  await new Promise((resolve, reject) => execFile('xprop',
+    ['-display', DISPLAY, '-root', '-f', '_NET_WORKAREA', '32c', '-set', '_NET_WORKAREA', workArea],
+    (e) => (e ? reject(e) : resolve())));
+}
 
 function launchChrome() {
+  const mode = HEADLESS
+    ? ['--headless=new', '--disable-gpu', '--hide-scrollbars', `--window-size=${WIDTH},${HEIGHT}`]
+    : [
+        // one maximized window: the whole screen above the taskbar
+        '--window-position=0,0',
+        `--window-size=${WIDTH},${HEIGHT - TASKBAR}`,
+        // no first-run, default-browser, keyring or "restore pages?" prompts
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--password-store=basic',
+        '--hide-crash-restore-bubble',
+        // WebGL on Mesa's software renderer (llvmpipe), like a desktop without
+        // a GPU driver. Chromium blocklists it, and no WebGL at all is a bot tell.
+        '--ignore-gpu-blocklist',
+      ];
   const args = [
-    '--headless=new',
+    ...mode,
     '--no-sandbox',
-    '--disable-gpu',
     '--disable-dev-shm-usage',
-    '--hide-scrollbars',
+    // tabs the agent drives or a viewer watches keep running at full speed,
+    // even when they are behind another tab or window
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
     `--remote-debugging-address=${CHROME_HOST}`,
     `--remote-debugging-port=${CHROME_PORT}`,
     '--remote-allow-origins=*', // Chrome 111+ rejects the CDP WS upgrade without this
-    `--window-size=${WIDTH},${HEIGHT}`,
     '--user-data-dir=/tmp/cdp-profile',
+    ...(process.env.CHROME_ARGS || '').split(/\s+/).filter(Boolean),
     'about:blank',
   ];
   log('launching chromium:', CHROME_BIN, args.join(' '));
-  const proc = spawn(CHROME_BIN, args, { stdio: ['ignore', 'inherit', 'inherit'] });
+  const env = HEADLESS ? process.env : { ...process.env, DISPLAY };
+  const proc = spawn(CHROME_BIN, args, { env, stdio: ['ignore', 'inherit', 'pipe'] });
+  // A container has no D-Bus, and headful Chromium logs an ERROR line for every
+  // failed attempt to reach it. Drop those; pass everything else through.
+  readline.createInterface({ input: proc.stderr }).on('line', (line) => {
+    if (!/:ERROR:dbus\//.test(line)) process.stderr.write(line + '\n');
+  });
   proc.on('exit', (code) => {
     log(`chromium exited (${code}) — shutting down hub`);
     process.exit(code ?? 1);
@@ -686,6 +755,7 @@ server.on('upgrade', (req, socket, head) => {
 
 (async () => {
   log(`containerized-browser ${VERSION} starting`);
+  if (!HEADLESS) await startDisplay();
   launchChrome();
   await waitForChrome();
   await startScreencaster();

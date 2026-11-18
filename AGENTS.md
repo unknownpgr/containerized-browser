@@ -1,6 +1,7 @@
 # Working on this repo
 
-containerized-browser is one container: headless Chromium plus a Node hub
+containerized-browser is one container: desktop Chromium on a virtual screen
+(Xvfb) plus a Node hub
 (`server.js`) that exposes `/exec`, `/session`, `/cdp`, a live viewer at `/`
 (`public/index.html`, behind the sign-in page `public/login.html`) and the
 agent manual at `/guide` (`GUIDE.md`). README.md
@@ -15,7 +16,8 @@ four have happened.
 2. **Release the image** by running `scripts/release.sh`. It:
    - bumps the version by one (`version.txt`: N → N+1),
    - builds the image from the working tree with `vN+1` baked in,
-   - smoke-tests that exact image (reported version, auth, sign-in, viewer, `/exec`),
+   - smoke-tests that exact image (reported version, auth, sign-in, viewer,
+     `/exec`, a non-headless user agent),
    - pushes `unknownpgr/containerized-browser:vN+1` and `:latest`,
    - re-pins the image tag in the `docker run` commands of BOOTSTRAP.md and
      README.md to `vN+1`.
@@ -27,7 +29,7 @@ four have happened.
 
 The image is built from the working tree in step 2, so don't release with
 unrelated uncommitted edits in anything the image copies (`Dockerfile`,
-`package.json`, `server.js`, `GUIDE.md`, `public/`).
+`package.json`, `server.js`, `GUIDE.md`, `public/`, `chromium-policies.json`).
 
 To try a change before releasing, build and run it locally instead:
 
@@ -36,6 +38,18 @@ docker build -t cb-dev . && docker run --rm -p 8080:8080 -e AUTH_PASSWORD=dev cb
 ```
 
 A local build like this reports its version as `dev`.
+
+## Looking like a desktop browser
+
+Sites must not be able to tell this browser from a person's desktop Chromium.
+Chromium therefore runs headful on Xvfb rather than with `--headless`, and the
+hub drives it with Patchright (`patchright-core`), not stock `playwright-core`,
+whose `Runtime.enable` on every page is detectable. Keep it that way: any CDP
+client the hub adds must not enable the `Runtime` (or `Console`) domain on
+pages. When you change launch flags, the driver or anything that touches pages,
+compare before and after on <https://deviceandbrowserinfo.com/are_you_a_bot>
+("You are human!"), <https://bot.sannysoft.com> (no red rows) and
+<https://www.browserscan.net/bot-detection> ("Normal").
 
 ## Versioning
 

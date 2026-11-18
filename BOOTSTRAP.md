@@ -22,12 +22,20 @@ You drive it by `POST`ing JavaScript and reading JSON back, so the host needs
 1. **Run the container** (the user has `docker`):
 
    ```bash
-   docker run --rm -d -p 8080:8080 --name cb unknownpgr/containerized-browser:v3
+   docker run --rm -d -p 8080:8080 --name cb unknownpgr/containerized-browser:v4
    ```
 
    Use port `8080` unless the user wants another; map it the same on both sides.
    Optionally pin the password with `-e AUTH_PASSWORD=…`; if you don't, the
    container generates one and prints it to its logs (see step 2a).
+
+   Recommended: give the browser the user's own time zone and language, as
+   their desktop browser would have, by adding `-e TZ=<IANA zone> -e LANG=<locale>`
+   before the image name, e.g. `-e TZ=Asia/Seoul -e LANG=ko_KR.UTF-8`. Take them
+   from the host (on Linux and macOS `readlink /etc/localtime` ends in the zone;
+   `echo $LANG`) or from the language the user writes in. Without them the
+   browser reports UTC and US English, which sites may compare with where the
+   connection comes from.
 
 2. **Read the full operating guide** from the running container and follow it:
 

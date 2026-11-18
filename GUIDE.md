@@ -6,6 +6,11 @@ by **POSTing JavaScript to an HTTP surface** and reading JSON back. You need
 nothing installed on the host except a shell with `curl` — no Playwright, no
 node, no npm.
 
+To websites it looks like an ordinary desktop browser, not a headless or
+automated one: a normal Chromium window on a 1920×1080 screen, with a mouse,
+scrollbars and WebGL, and no automation markers. Sites that turn headless
+browsers away usually open normally.
+
 Throughout this guide the container is assumed to be reachable at
 `http://localhost:8080` (the port the user mapped with `docker run -p 8080:8080`).
 If a different host/port was used, substitute it everywhere.
@@ -107,6 +112,16 @@ Notes:
   generated script stays robust:
   `page.getByRole('button', { name: 'Sign in' })`, `page.getByLabel('Email')`.
 
+The API is Playwright's, run by [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright),
+a drop-in Playwright fork that sites can't detect. Two things differ from stock Playwright:
+
+- **`page.evaluate` runs in an isolated world.** It sees and changes the DOM as
+  usual, but not the page's own JavaScript variables. To read those, pass
+  `false` as the 4th argument:
+  `await page.evaluate(() => window.appState, undefined, undefined, false)`.
+- **`page.on('console')` never fires.** Listening for console messages needs
+  the CDP call that gives automation away. Return values or `log(...)` instead.
+
 ---
 
 ## 2. See the page — return bytes from `/exec`
@@ -142,13 +157,15 @@ curl -s localhost:8080/session     # -> { "steps": [ { "ts": ..., "code": "..." 
 
 Each `code` is a Playwright snippet you already ran successfully, in order.
 Render them into a **standalone `.js` file that assumes this container is running
-at a host:port** and reproduces the task. Default to a `playwright-core`
-client that attaches over CDP:
+at a host:port** and reproduces the task. Default to a `patchright-core`
+client that attaches over CDP. It is the same Playwright API the snippets ran
+on here (§1). Stock `playwright-core` also works, but it shows sites that the
+browser is automated, and its `page.evaluate` runs in the page's own world:
 
 ```js
 // flow.js — run with: CDP=http://localhost:8080/cdp AUTH=<password> node flow.js [args]
-// requires once on the runner:  npm i playwright-core
-const { chromium } = require('playwright-core');
+// requires once on the runner:  npm i patchright-core
+const { chromium } = require('patchright-core');
 
 (async () => {
   // the container is auth-guarded; pass the shared secret as a Bearer header.
@@ -178,7 +195,7 @@ When you codify:
 
 Zero-dependency variant (optional): if the user wants the script to run with
 **nothing installed**, emit a plain node script that re-POSTs the snippets to
-`/exec` using `fetch`. Prefer the `playwright-core` form unless they ask.
+`/exec` using `fetch`. Prefer the `patchright-core` form unless they ask.
 
 Call `POST /session/reset` to start recording a fresh task from scratch.
 
@@ -209,4 +226,12 @@ All paths require the password (§0a) **except `/guide`**, which is public.
 - **Newest page wins**: when a click opens a new tab, `page` follows it — and
   so does the viewer, unless the human pinned another tab or is watching all
   tabs. Older tabs stay reachable via `context.pages()`.
+- **Bot checks**: the browser passes as a desktop one, but a site can still
+  show a CAPTCHA, for example because of the network's reputation. The viewer
+  is read-only, so the human can't solve it there: tell them, and don't try to
+  get around it.
+- **Time zone and language** were fixed when the container was started
+  (`TZ`, `LANG`); the default is UTC and US English. If a site shows the wrong
+  region or language, tell the user and suggest restarting with their own,
+  e.g. `-e TZ=Asia/Seoul -e LANG=ko_KR.UTF-8`.
 - No audio; the viewer is observation-only by design.
