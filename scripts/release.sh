@@ -6,7 +6,7 @@
 # 1. reads the last released version N from version.txt and picks v(N+1)
 # 2. builds the image from the working tree with that version baked in
 # 3. smoke-tests the exact image (version reported, auth enforced, sign-in, /exec works,
-#    desktop rather than headless Chromium)
+#    desktop Google Chrome rather than headless)
 # 4. pushes :v(N+1) and :latest, recording N+1 in version.txt
 # 5. re-pins the image tag in BOOTSTRAP.md / README.md run commands to v(N+1)
 #
@@ -56,8 +56,11 @@ docker logs "$name" 2>&1 | grep -qx "VERSION=$tag" || fail "boot log is missing 
 out="$(curl -s "${auth[@]}" -X POST "$base/exec" \
   --data-binary 'await page.setContent("<title>smoke</title>"); return await page.title()' || true)"
 [[ "$out" == *'"result":"smoke"'* ]] || fail "/exec failed: $out"
-ua="$(curl -s "${auth[@]}" -X POST "$base/exec" --data-binary 'return await page.evaluate(() => navigator.userAgent)' || true)"
-[[ "$ua" == *'"ok":true'* && "$ua" != *Headless* ]] || fail "browser is not running as desktop Chromium: $ua"
+ua="$(curl -s "${auth[@]}" -X POST "$base/exec" \
+  --data-binary 'await page.goto("http://127.0.0.1:8080/guide"); // userAgentData needs a secure context
+return await page.evaluate(() => navigator.userAgent + " | " + navigator.userAgentData.brands.map((b) => b.brand))' || true)"
+[[ "$ua" == *'"ok":true'* && "$ua" != *Headless* && "$ua" == *'Google Chrome'* ]] \
+  || fail "browser is not running as desktop Google Chrome: $ua"
 docker rm -f "$name" >/dev/null
 trap - EXIT
 echo "    ok"

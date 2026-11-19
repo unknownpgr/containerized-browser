@@ -10,7 +10,7 @@ hand you a **standalone script** that reproduces what you just did.
    │  POST /exec  (JS in → JSON,  ┌───────────────────────────────────┐
    │     or raw bytes for a    ──►│  one container, one port (8080)   │
    │     screenshot/pdf Buffer)   │                                   │
-   │  GET  /session  (codify)  ──►│   Chromium (desktop) + Playwright │
+   │  GET  /session  (codify)  ──►│   Chrome (desktop) + Playwright   │
    │  GET  /guide  (self-doc)  ──►│   + hub + live screencast viewer  │
  You (browser)  GET / ───────────►└───────────────────────────────────┘
         live read-only view
@@ -60,9 +60,10 @@ This design is the endpoint of a few deliberate decisions:
    independently (CDP allows multiple clients on one Chrome).
 
 6. **Sites see an ordinary desktop browser.** Many sites turn headless or
-   automated browsers away. So Chromium is not run with `--headless`: it is a
-   normal window, maximized on a virtual 1920×1080 screen (Xvfb) above a
-   taskbar-sized strip, with a mouse, scrollbars and WebGL. The driver is
+   automated browsers away. So the browser is Google Chrome, the one most
+   people use, and it is not run with `--headless`: it is a normal window,
+   maximized on a virtual 1920×1080 screen (Xvfb) above a taskbar-sized strip,
+   with a mouse, scrollbars and WebGL. The driver is
    [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright), a drop-in
    Playwright fork that leaves out the CDP calls (`Runtime.enable`) that let a
    page notice it is being automated. The screencast uses only the Page domain,
@@ -73,7 +74,7 @@ This design is the endpoint of a few deliberate decisions:
 Pull and run the published image (no build needed):
 
 ```bash
-docker run --rm -d -p 8080:8080 --name cb unknownpgr/containerized-browser:v4
+docker run --rm -d -p 8080:8080 --name cb unknownpgr/containerized-browser:v5
 ```
 
 The tag is the current release (see [Versions](#versions)). `:latest` also
@@ -131,9 +132,9 @@ instead.
 | `VIEW_QUALITY` | `60` | screencast JPEG quality (1–100) |
 | `TZ` | `UTC` | the browser's time zone, e.g. `Asia/Seoul` |
 | `LANG` | *(US English)* | the browser's language: UI, `navigator.languages`, `Accept-Language` and `Intl`, e.g. `ko_KR.UTF-8` |
-| `HEADLESS` | *(off)* | `1` runs Chromium with `--headless` as before v4, with no virtual screen. Sites can tell |
-| `CHROME_ARGS` | *(none)* | extra Chromium command-line flags, space-separated |
-| `CHROME_BIN` | `/usr/bin/chromium` | chromium binary path |
+| `HEADLESS` | *(off)* | `1` runs Chrome with `--headless` as before v4, with no virtual screen. Sites can tell |
+| `CHROME_ARGS` | *(none)* | extra Chrome command-line flags, space-separated |
+| `CHROME_BIN` | `/usr/bin/google-chrome` | browser binary path |
 
 ## Auth
 
@@ -161,7 +162,7 @@ The same secret works two ways:
 - **Dev tool, not production.** `/exec` evaluates arbitrary JavaScript; keep the
   password secret, bind the container to localhost and don't point it at
   untrusted pages. `--no-sandbox` is used (runs as root in the container); a
-  Chromium policy (`chromium-policies.json`) hides the warning bar it would show.
+  Chrome policy (`chrome-policies.json`) hides the warning bar it would show.
 - **Newest page wins.** When a click opens a new tab, the controller's `page`
   follows it.
 - **Every tab is watchable.** The page fills the viewer window. A small panel
@@ -173,11 +174,12 @@ The same secret works two ways:
   watching are screencast.
 - **Fonts.** Latin, CJK (Korean/Japanese/Chinese, via Noto CJK) and color emoji
   are bundled. Other scripts (e.g. Arabic, Thai) may render as tofu (□).
-- **What still differs from a desktop.** It is Chromium, not Google Chrome (no
-  Widevine DRM, so Netflix-style video won't play). WebGL renders in software
-  (Mesa llvmpipe), as on a machine without a GPU driver. There are no audio
-  devices. And a site may still show a CAPTCHA because of the network's
-  reputation; the viewer is read-only, so it can't be solved there.
+- **What still differs from a desktop.** WebGL renders in software (Mesa
+  llvmpipe), as on a machine without a GPU driver. There are no audio devices.
+  And a site may still show a CAPTCHA because of the network's reputation; the
+  viewer is read-only, so it can't be solved there.
+- **Google Chrome is redistributed.** The image (and its base image) contain
+  Google Chrome, which is proprietary software under Google's terms.
 - **Agent API differences.** Because the driver is Patchright, `page.evaluate`
   runs in an isolated world (it sees the DOM, not the page's own variables, unless
   you pass `false` as its 4th argument) and `page.on('console')` never fires.
@@ -202,10 +204,15 @@ To see which release a container is running, use any of these:
 A local build reports `dev`. How a release is made is described in
 [AGENTS.md](./AGENTS.md).
 
+The browser is pinned as well. Every release builds on a base image,
+`unknownpgr/containerized-browser-base:chrome-<version>`, pinned by digest, so
+the Chrome version only changes in a release whose notes say so.
+
 ## Release notes
 
 | version | date | changes |
 |---------|------------|---------|
+| v5 | 2026-11-19 | The browser is now Google Chrome 158.0.8127.36 (was Debian's Chromium 156), so sites see the "Google Chrome" brand that most real visitors have, and Widevine DRM is available. Chrome is frozen in a base image pinned by digest, so it only changes in a release that says so; npm dependencies are pinned exactly too. `CHROME_BIN` now defaults to `/usr/bin/google-chrome`. |
 | v4 | 2026-11-18 | Sites now see an ordinary desktop browser, so many that refused the headless one open normally. Chromium runs as a normal window on a virtual screen instead of `--headless`: no "HeadlessChrome" in the user agent, a real screen with a taskbar, mouse, scrollbars and WebGL. The driver is now Patchright, which hides automation from pages. Its API is Playwright's, except that `page.evaluate` runs in an isolated world (pass `false` as the 4th argument to reach page variables) and `page.on('console')` doesn't fire. The default screen is 1920×1080 (was 1280×800). `TZ` and `LANG` set the browser's time zone and language. `HEADLESS=1` restores the old mode, and `CHROME_ARGS` adds Chromium flags. Generated scripts should use `patchright-core` instead of `playwright-core`. |
 | v3 | 2026-11-17 | The viewer has its own sign-in page instead of the browser's native login prompt; a browser that opens any page without the password lands there, and returns to that page after signing in. New `POST /login`. If the container restarts with a different password, an open viewer goes back to the sign-in page by itself. Agents are unaffected: Bearer, `?token=` and `curl -u` all work as before. |
 | v2 | 2026-11-17 | Redesigned viewer. The page now fills the whole window, and the tabs, URL, view mode, connection status and version sit in a small panel floating at the bottom that fades out while the mouse is idle. The viewer uses the system font with a neutral look, follows the OS light/dark setting, and scales the page up to fit large windows. |

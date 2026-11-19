@@ -7,7 +7,7 @@ nothing installed on the host except a shell with `curl` — no Playwright, no
 node, no npm.
 
 To websites it looks like an ordinary desktop browser, not a headless or
-automated one: a normal Chromium window on a 1920×1080 screen, with a mouse,
+automated one: a normal Google Chrome window on a 1920×1080 screen, with a mouse,
 scrollbars and WebGL, and no automation markers. Sites that turn headless
 browsers away usually open normally.
 
@@ -51,7 +51,7 @@ The user may have only seen a bootstrap URL and nothing else, so they can be
 confused about what just happened. Before you start driving the browser, tell
 them, briefly and in their language:
 
-- **What this is**: a real Chromium running inside a container that you (the
+- **What this is**: a real Chrome browser running inside a container that you (the
   agent) will drive on their behalf. They watch; they don't have to click.
 - **How to watch**: open **http://localhost:8080/** in their browser — it is a
   live, read-only screencast of the page you are controlling. Give them the
@@ -102,7 +102,7 @@ Response shape:
 
 Notes:
 - **State persists** between calls — cookies, the open page, scroll position all
-  live in the container's Chromium. Build up a task across many small `/exec`
+  live in the container's Chrome. Build up a task across many small `/exec`
   calls.
 - The return value must be JSON-serializable. To inspect a DOM element, return a
   derived value (`await page.locator('h1').innerText()`), not the handle itself.

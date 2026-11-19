@@ -1,7 +1,7 @@
 {
   "name": "containerized-browser",
   "version": "0.1.0",
-  "description": "Desktop Chromium on a virtual screen in a container: Playwright (Patchright) drives it over CDP, users watch live via a read-only web UI (CDP screencast).",
+  "description": "Desktop Google Chrome on a virtual screen in a container: Playwright (Patchright) drives it over CDP, users watch live via a read-only web UI (CDP screencast).",
   "private": true,
   "type": "commonjs",
   "scripts": {
@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "http-proxy": "^1.18.1",
-    "patchright-core": "^1.64.3",
+    "patchright-core": "1.64.3",
     "ws": "^8.18.0"
   }
 }

@@ -1,6 +1,6 @@
 # Working on this repo
 
-containerized-browser is one container: desktop Chromium on a virtual screen
+containerized-browser is one container: desktop Google Chrome on a virtual screen
 (Xvfb) plus a Node hub
 (`server.js`) that exposes `/exec`, `/session`, `/cdp`, a live viewer at `/`
 (`public/index.html`, behind the sign-in page `public/login.html`) and the
@@ -29,7 +29,8 @@ four have happened.
 
 The image is built from the working tree in step 2, so don't release with
 unrelated uncommitted edits in anything the image copies (`Dockerfile`,
-`package.json`, `server.js`, `GUIDE.md`, `public/`, `chromium-policies.json`).
+`package.json`, `package-lock.json`, `server.js`, `GUIDE.md`, `public/`,
+`chrome-policies.json`).
 
 To try a change before releasing, build and run it locally instead:
 
@@ -41,8 +42,8 @@ A local build like this reports its version as `dev`.
 
 ## Looking like a desktop browser
 
-Sites must not be able to tell this browser from a person's desktop Chromium.
-Chromium therefore runs headful on Xvfb rather than with `--headless`, and the
+Sites must not be able to tell this browser from a person's desktop Chrome.
+Chrome therefore runs headful on Xvfb rather than with `--headless`, and the
 hub drives it with Patchright (`patchright-core`), not stock `playwright-core`,
 whose `Runtime.enable` on every page is detectable. Keep it that way: any CDP
 client the hub adds must not enable the `Runtime` (or `Console`) domain on
@@ -50,6 +51,26 @@ pages. When you change launch flags, the driver or anything that touches pages,
 compare before and after on <https://deviceandbrowserinfo.com/are_you_a_bot>
 ("You are human!"), <https://bot.sannysoft.com> (no red rows) and
 <https://www.browserscan.net/bot-detection> ("Normal").
+
+## Chrome is frozen in a base image
+
+So that no release picks up a different browser by accident, Google Chrome is
+installed once into a base image, not on every build:
+
+- `base/Dockerfile` installs Chrome from Google's signed apt repository, plus
+  Xvfb, fonts and Node, then removes the repository so nothing can upgrade it.
+  System packages belong there, not in `Dockerfile`, so they are frozen too.
+- `scripts/build-base.sh` builds it, publishes it as
+  `unknownpgr/containerized-browser-base:chrome-<version>` and pins the
+  `FROM` line of `Dockerfile` to that tag *and its digest*. Like `vN`, a base
+  tag is immutable: the script refuses to overwrite one.
+- An ordinary release reuses the pinned base. To move to a newer Chrome (e.g.
+  for a security fix), run `scripts/build-base.sh`, compare the bot-detection
+  pages below against the previous release, then follow the development
+  procedure as usual and name the new Chrome version in the release note.
+- npm dependencies are pinned exactly too (`package.json` and
+  `package-lock.json`, installed with `npm ci`). Update them on purpose, e.g.
+  `npm install --save-exact patchright-core@<version>`, and test.
 
 ## Versioning
 
